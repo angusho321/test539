@@ -14,7 +14,7 @@ def download_from_google_drive():
     """從 Google Drive 下載 lottery_hist.xlsx"""
     
     # 設定 Google Drive API
-    SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+    SCOPES = ['https://www.googleapis.com/auth/drive']
     
     # 從環境變數讀取認證
     creds = Credentials.from_service_account_file(

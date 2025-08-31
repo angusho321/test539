@@ -13,8 +13,8 @@ from datetime import datetime
 def upload_to_google_drive():
     """上傳 prediction_log.xlsx 到 Google Drive"""
     
-    # 設定 Google Drive API
-    SCOPES = ['https://www.googleapis.com/auth/drive.file']
+    # 設定 Google Drive API - 使用更廣泛的權限範圍
+    SCOPES = ['https://www.googleapis.com/auth/drive']
     
     # 從環境變數讀取認證
     creds = Credentials.from_service_account_file(
@@ -49,8 +49,28 @@ def upload_to_google_drive():
         
         if original_file_id:
             try:
+                # 首先驗證服務帳號是否能存取檔案
+                print(f"🔍 驗證檔案存取權限 ID: {original_file_id}")
+                
+                # 嘗試取得檔案資訊
+                file_info = service.files().get(fileId=original_file_id, 
+                                               fields='id,name,parents,permissions').execute()
+                print(f"📄 檔案資訊: {file_info.get('name')}")
+                print(f"📁 檔案 ID: {file_info.get('id')}")
+                print(f"📂 父資料夾: {file_info.get('parents', ['根目錄'])}")
+                
+                # 檢查權限
+                try:
+                    permissions = service.permissions().list(fileId=original_file_id).execute()
+                    print(f"🔐 檔案權限數量: {len(permissions.get('permissions', []))}")
+                    for perm in permissions.get('permissions', []):
+                        if 'serviceAccount' in perm.get('type', ''):
+                            print(f"   服務帳號權限: {perm.get('role', 'unknown')}")
+                except Exception as perm_error:
+                    print(f"⚠️ 無法讀取權限: {str(perm_error)}")
+                
                 # 更新現有檔案（推薦方式，避免服務帳號儲存限制）
-                print(f"🔄 更新現有檔案 ID: {original_file_id}")
+                print(f"🔄 開始更新檔案...")
                 media = MediaFileUpload('prediction_log.xlsx',
                                       mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
                 
@@ -63,8 +83,8 @@ def upload_to_google_drive():
                 return True
                 
             except Exception as update_error:
-                print(f"⚠️ 更新現有檔案失敗: {str(update_error)}")
-                print("🔄 改為嘗試建立新檔案...")
+                print(f"⚠️ 檔案存取或更新失敗: {str(update_error)}")
+                print("🔄 嘗試其他解決方案...")
         
         # 如果沒有指定檔案ID或更新失敗，嘗試建立新檔案
         try:
