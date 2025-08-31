@@ -143,10 +143,49 @@ def log_predictions_to_excel(predictions, log_file="prediction_log.xlsx"):
         logger.error(f"❌ 保存預測記錄時發生錯誤: {e}")
         return False
 
+def is_prediction_day(check_date=None):
+    """
+    檢查指定日期是否需要預測（週一到週六）
+    Args:
+        check_date: 要檢查的日期，None表示今天
+    Returns:
+        bool: True表示需要預測，False表示不需要
+    """
+    if check_date is None:
+        check_date = datetime.now()
+    elif isinstance(check_date, str):
+        try:
+            check_date = datetime.strptime(check_date, "%Y-%m-%d")
+        except:
+            logger.warning(f"⚠️ 日期格式錯誤: {check_date}")
+            return True  # 預設為預測日
+    
+    # 取得星期幾 (0=週一, 6=週日)
+    weekday = check_date.weekday()
+    
+    # 週一到週六預測 (0-5)，週日不預測 (6)
+    is_predict_day = weekday < 6
+    
+    weekday_names = ['週一', '週二', '週三', '週四', '週五', '週六', '週日']
+    logger.info(f"📅 檢查日期: {check_date.strftime('%Y-%m-%d')} ({weekday_names[weekday]})")
+    
+    if is_predict_day:
+        logger.info(f"✅ {weekday_names[weekday]} 執行預測")
+    else:
+        logger.info(f"⏸️ {weekday_names[weekday]} 跳過預測，留給週一自己預測")
+    
+    return is_predict_day
+
 def main():
     """主程式 - 僅預測版本"""
     logger.info("🌅 539彩票預測系統 - 上午預測版本")
     logger.info("="*60)
+    
+    # 檢查今天是否需要預測
+    if not is_prediction_day():
+        logger.info("⏸️ 今日（週日）跳過預測")
+        logger.info("💡 週一會重新開始預測週期")
+        return True  # 返回成功，因為這是預期的行為
     
     # 檢查輸入檔案
     excel_file = "lottery_hist.xlsx"

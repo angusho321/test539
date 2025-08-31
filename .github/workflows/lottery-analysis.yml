@@ -9,10 +9,10 @@ on:
   workflow_dispatch: # 允許手動觸發
 
 jobs:
-  # 上午執行：生成預測
+  # 上午執行：生成預測（週一到週六）
   morning-prediction:
     runs-on: ubuntu-latest
-    if: github.event.schedule == '0 1 * * *' || github.event_name == 'workflow_dispatch'
+    if: (github.event.schedule == '0 1 * * *' || github.event_name == 'workflow_dispatch')
     
     steps:
     - name: 🔄 Checkout repository
@@ -57,10 +57,10 @@ jobs:
           *.log
         retention-days: 30
 
-  # 晚上執行：記錄開獎結果並驗證
+  # 晚上執行：記錄開獎結果並驗證（週一到週六）
   evening-verification:
     runs-on: ubuntu-latest
-    if: github.event.schedule == '0 14 * * *' || github.event_name == 'workflow_dispatch'
+    if: (github.event.schedule == '0 14 * * *' || github.event_name == 'workflow_dispatch')
     
     steps:
     - name: 🔄 Checkout repository
