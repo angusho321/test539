@@ -44,36 +44,63 @@ def upload_to_google_drive():
         today = datetime.now().strftime("%Y-%m-%d")
         filename = f"prediction_log_{today}.xlsx"
         
-        # 檔案 metadata
-        file_metadata = {
-            'name': filename
-        }
-        
-        # 如果指定了資料夾，設定父資料夾
-        if FOLDER_ID:
-            file_metadata['parents'] = [FOLDER_ID]
-        
-        # 上傳檔案
-        media = MediaFileUpload('prediction_log.xlsx',
-                              mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        
-        file = service.files().create(body=file_metadata,
-                                    media_body=media,
-                                    fields='id,name,webViewLink').execute()
-        
-        print(f"✅ 成功上傳: {file.get('name')}")
-        print(f"📁 檔案 ID: {file.get('id')}")
-        print(f"🔗 檢視連結: {file.get('webViewLink')}")
-        
-        # 同時更新原始檔案 (覆蓋模式)
+        # 優先嘗試更新現有檔案
         original_file_id = os.environ.get('PREDICTION_LOG_FILE_ID')
+        
         if original_file_id:
+            try:
+                # 更新現有檔案（推薦方式，避免服務帳號儲存限制）
+                print(f"🔄 更新現有檔案 ID: {original_file_id}")
+                media = MediaFileUpload('prediction_log.xlsx',
+                                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                
+                updated_file = service.files().update(fileId=original_file_id,
+                                                     media_body=media,
+                                                     fields='id,name,webViewLink').execute()
+                print(f"✅ 成功更新檔案: {updated_file.get('name')}")
+                print(f"📁 檔案 ID: {updated_file.get('id')}")
+                print(f"🔗 檢視連結: {updated_file.get('webViewLink')}")
+                return True
+                
+            except Exception as update_error:
+                print(f"⚠️ 更新現有檔案失敗: {str(update_error)}")
+                print("🔄 改為嘗試建立新檔案...")
+        
+        # 如果沒有指定檔案ID或更新失敗，嘗試建立新檔案
+        try:
+            print("📝 嘗試建立新檔案...")
+            
+            # 檔案 metadata
+            file_metadata = {
+                'name': filename
+            }
+            
+            # 如果指定了資料夾，設定父資料夾
+            if FOLDER_ID:
+                file_metadata['parents'] = [FOLDER_ID]
+                print(f"📁 目標資料夾 ID: {FOLDER_ID}")
+            
+            # 上傳檔案
             media = MediaFileUpload('prediction_log.xlsx',
                                   mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             
-            service.files().update(fileId=original_file_id,
-                                 media_body=media).execute()
-            print("✅ 同時更新了原始預測記錄檔案")
+            file = service.files().create(body=file_metadata,
+                                        media_body=media,
+                                        fields='id,name,webViewLink').execute()
+            
+            print(f"✅ 成功建立新檔案: {file.get('name')}")
+            print(f"📁 檔案 ID: {file.get('id')}")
+            print(f"🔗 檢視連結: {file.get('webViewLink')}")
+            print(f"💡 建議將此檔案 ID 新增為 GitHub Secret: PREDICTION_LOG_FILE_ID")
+            
+        except Exception as create_error:
+            print(f"❌ 建立新檔案也失敗: {str(create_error)}")
+            print("💡 解決方案：")
+            print("   1. 在 Google Drive 手動建立 prediction_log.xlsx")
+            print("   2. 分享給服務帳號（編輯者權限）")
+            print("   3. 將檔案 ID 新增為 GitHub Secret: PREDICTION_LOG_FILE_ID")
+            print(f"   4. 服務帳號郵件: lottery-analysis-bot@test-539-470702.iam.gserviceaccount.com")
+            raise create_error
         
         return True
         

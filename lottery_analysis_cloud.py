@@ -184,6 +184,13 @@ def main():
         
         if success:
             logger.info("🎉 分析完成並成功記錄!")
+            
+            # 檢查檔案是否確實建立
+            if os.path.exists("prediction_log.xlsx"):
+                file_size = os.path.getsize("prediction_log.xlsx")
+                logger.info(f"📊 預測檔案已建立: prediction_log.xlsx ({file_size} bytes)")
+            else:
+                logger.warning("⚠️ 預測檔案可能建立失敗")
         else:
             logger.error("❌ 記錄預測結果時發生錯誤")
             return False
