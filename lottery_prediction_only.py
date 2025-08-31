@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-彩票分析程式 - 雲端版本
-適用於 GitHub Actions 等雲端環境
+彩票預測程式 - 僅預測版本
+專門用於上午時段，只生成預測不驗證
 """
 
 import pandas as pd
@@ -17,8 +17,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # 從原本的 lottery_analysis.py 複製核心函數
-# (這裡只包含主要函數，完整版請從原檔案複製)
-
 def load_lottery_excel(excel_path: str):
     """讀入 .xlsx 開獎紀錄"""
     return pd.read_excel(excel_path, engine='openpyxl')
@@ -63,28 +61,8 @@ def suggest_numbers(strategy='smart', n=9, historical_stats=None):
     else:  # smart or balanced
         return sorted(random.sample(numbers, n))
 
-def check_daily_analysis_exists(log_file="prediction_log.xlsx"):
-    """檢查今日是否已有分析記錄 (雲端版本)"""
-    if not Path(log_file).exists():
-        return False
-    
-    try:
-        current_time = datetime.now()
-        date_str = current_time.strftime("%Y-%m-%d")
-        
-        existing_df = pd.read_excel(log_file, engine='openpyxl')
-        today_records = existing_df[existing_df['日期'] == date_str]
-        
-        if len(today_records) > 0:
-            logger.info(f"📅 檢測到今日({date_str})已有分析記錄")
-            return True
-        return False
-    except Exception as e:
-        logger.warning(f"⚠️ 檢查今日記錄時發生錯誤: {e}")
-        return False
-
 def log_predictions_to_excel(predictions, log_file="prediction_log.xlsx"):
-    """記錄預測結果 (雲端版本)"""
+    """記錄預測結果 (僅預測版本)"""
     current_time = datetime.now()
     date_str = current_time.strftime("%Y-%m-%d")
     time_str = current_time.strftime("%H:%M:%S")
@@ -100,9 +78,9 @@ def log_predictions_to_excel(predictions, log_file="prediction_log.xlsx"):
         '冷號優先': str(predictions.get('cold', [])),
         '智能選號_前5號': str(predictions.get('smart', [])[:5]) if predictions.get('smart') else '',
         '平衡策略_前5號': str(predictions.get('balanced', [])[:5]) if predictions.get('balanced') else '',
-        '驗證結果': '',
-        '中獎號碼數': '',
-        '備註': f"雲端自動分析 - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}"
+        '驗證結果': '',  # 留空，等待晚上驗證
+        '中獎號碼數': '',  # 留空，等待驗證
+        '備註': f"上午預測 - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}"
     }
     
     # 檢查檔案是否存在
@@ -111,14 +89,44 @@ def log_predictions_to_excel(predictions, log_file="prediction_log.xlsx"):
     if log_path.exists():
         try:
             existing_df = pd.read_excel(log_file, engine='openpyxl')
-            new_df = pd.DataFrame([log_data])
             
-            # 檢查是否有新欄位需要添加到現有數據
-            for col in new_df.columns:
-                if col not in existing_df.columns:
-                    existing_df[col] = ''
+            # 檢查今天是否已有記錄
+            today_records = existing_df[existing_df['日期'] == date_str]
             
-            combined_df = pd.concat([existing_df, new_df], ignore_index=True)
+            if len(today_records) > 0:
+                # 今天已有記錄，覆蓋最新的一筆
+                latest_today_index = today_records.index[-1]
+                
+                # 保留已驗證的結果（如果有的話）
+                old_record = existing_df.loc[latest_today_index]
+                if pd.notna(old_record.get('驗證結果', '')) and old_record.get('驗證結果', '') != '':
+                    log_data['驗證結果'] = old_record['驗證結果']
+                    log_data['中獎號碼數'] = old_record['中獎號碼數']
+                    log_data['備註'] = f"上午預測（保留驗證結果） - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}"
+                    logger.info("🔄 更新今日預測，保留已驗證結果")
+                else:
+                    logger.info("🔄 更新今日預測")
+                
+                # 覆蓋該記錄
+                for key, value in log_data.items():
+                    if key in existing_df.columns:
+                        existing_df.loc[latest_today_index, key] = value
+                    else:
+                        existing_df[key] = ''
+                        existing_df.loc[latest_today_index, key] = value
+                
+                combined_df = existing_df
+            else:
+                # 今天沒有記錄，新增
+                new_df = pd.DataFrame([log_data])
+                
+                # 檢查是否有新欄位需要添加到現有數據
+                for col in new_df.columns:
+                    if col not in existing_df.columns:
+                        existing_df[col] = ''
+                
+                combined_df = pd.concat([existing_df, new_df], ignore_index=True)
+                
         except Exception as e:
             logger.error(f"讀取現有記錄檔案時發生錯誤: {e}")
             combined_df = pd.DataFrame([log_data])
@@ -136,8 +144,8 @@ def log_predictions_to_excel(predictions, log_file="prediction_log.xlsx"):
         return False
 
 def main():
-    """主程式 - 雲端版本"""
-    logger.info("🎲 539彩票分析系統 - 雲端版本")
+    """主程式 - 僅預測版本"""
+    logger.info("🌅 539彩票預測系統 - 上午預測版本")
     logger.info("="*60)
     
     # 檢查輸入檔案
@@ -145,17 +153,6 @@ def main():
     if not Path(excel_file).exists():
         logger.error(f"❌ 找不到檔案: {excel_file}")
         return False
-    
-    # 檢查今日是否已有分析記錄
-    if check_daily_analysis_exists("prediction_log.xlsx"):
-        logger.info("✅ 今日分析已完成，跳過重複分析")
-        # 但仍然嘗試上傳現有的檔案
-        if os.path.exists("prediction_log.xlsx"):
-            logger.info("📤 嘗試上傳現有的預測記錄檔案")
-            return True
-        else:
-            logger.warning("⚠️ 預測記錄檔案不存在，將重新生成")
-            # 繼續執行分析
     
     try:
         # 載入資料
@@ -183,7 +180,7 @@ def main():
         success = log_predictions_to_excel(predictions, "prediction_log.xlsx")
         
         if success:
-            logger.info("🎉 分析完成並成功記錄!")
+            logger.info("🎉 上午預測完成並成功記錄!")
             
             # 檢查檔案是否確實建立
             if os.path.exists("prediction_log.xlsx"):
@@ -198,7 +195,7 @@ def main():
         return True
         
     except Exception as e:
-        logger.error(f"❌ 分析過程發生錯誤: {str(e)}")
+        logger.error(f"❌ 預測過程發生錯誤: {str(e)}")
         return False
 
 if __name__ == "__main__":

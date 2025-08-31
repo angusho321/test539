@@ -8,6 +8,39 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import ast
 
+def is_lottery_draw_day(check_date=None):
+    """
+    檢查指定日期是否為開獎日（週一到週六）
+    Args:
+        check_date: 要檢查的日期，None表示今天
+    Returns:
+        bool: True表示是開獎日，False表示不是
+    """
+    if check_date is None:
+        check_date = datetime.now()
+    elif isinstance(check_date, str):
+        try:
+            check_date = datetime.strptime(check_date, "%Y-%m-%d")
+        except:
+            print(f"⚠️ 日期格式錯誤: {check_date}")
+            return True  # 預設為開獎日
+    
+    # 取得星期幾 (0=週一, 6=週日)
+    weekday = check_date.weekday()
+    
+    # 週一到週六開獎 (0-5)，週日不開獎 (6)
+    is_draw_day = weekday < 6
+    
+    weekday_names = ['週一', '週二', '週三', '週四', '週五', '週六', '週日']
+    print(f"📅 檢查日期: {check_date.strftime('%Y-%m-%d')} ({weekday_names[weekday]})")
+    
+    if is_draw_day:
+        print(f"✅ {weekday_names[weekday]} 是開獎日")
+    else:
+        print(f"⏸️ {weekday_names[weekday]} 不開獎，跳過驗證")
+    
+    return is_draw_day
+
 def load_latest_lottery_results(excel_path: str):
     """讀取最新的開獎結果"""
     try:
@@ -292,6 +325,12 @@ def auto_verify_on_startup(prediction_log_file="prediction_log.xlsx",
         
         print(f"📅 最新開獎日期: {latest_lottery_date.strftime('%Y-%m-%d')}")
         print(f"📅 今日日期: {today.strftime('%Y-%m-%d')}")
+        
+        # 檢查昨天是否為開獎日
+        yesterday = datetime.now() - timedelta(days=1)
+        if not is_lottery_draw_day(yesterday):
+            print("⏸️ 昨天（週日）無開獎，跳過驗證")
+            return
         
         # 只有當有開獎結果可以驗證時才進行驗證
         if latest_lottery_date < today:
