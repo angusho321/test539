@@ -29,7 +29,16 @@ def upload_to_google_drive():
         # 檢查檔案是否存在
         if not os.path.exists('prediction_log.xlsx'):
             print("❌ prediction_log.xlsx 不存在")
+            print("📁 當前目錄檔案:")
+            import glob
+            files = glob.glob("*")
+            for f in files:
+                print(f"   - {f}")
             return False
+        
+        # 顯示檔案資訊
+        file_size = os.path.getsize('prediction_log.xlsx')
+        print(f"📊 準備上傳檔案: prediction_log.xlsx ({file_size} bytes)")
         
         # 設定檔案名稱 (包含日期)
         today = datetime.now().strftime("%Y-%m-%d")

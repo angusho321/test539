@@ -149,7 +149,13 @@ def main():
     # 檢查今日是否已有分析記錄
     if check_daily_analysis_exists("prediction_log.xlsx"):
         logger.info("✅ 今日分析已完成，跳過重複分析")
-        return True
+        # 但仍然嘗試上傳現有的檔案
+        if os.path.exists("prediction_log.xlsx"):
+            logger.info("📤 嘗試上傳現有的預測記錄檔案")
+            return True
+        else:
+            logger.warning("⚠️ 預測記錄檔案不存在，將重新生成")
+            # 繼續執行分析
     
     try:
         # 載入資料
