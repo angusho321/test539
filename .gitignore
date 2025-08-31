@@ -1,0 +1,57 @@
+# 敏感檔案 - 絕對不要上傳
+*.json
+credentials.json
+test-539-470702-*.json
+
+# Excel 檔案 - 這些會在 Google Drive 中管理
+lottery_hist.xlsx
+prediction_log.xlsx
+
+# Python 快取檔案
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 虛擬環境
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE 檔案
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 作業系統檔案
+.DS_Store
+Thumbs.db
+
+# 日誌檔案
+*.log
+
+# 臨時檔案
+*.tmp
+*.temp

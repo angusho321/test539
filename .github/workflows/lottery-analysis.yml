@@ -1,0 +1,54 @@
+name: 📊 Daily Lottery Analysis
+
+on:
+  schedule:
+    # 每天 UTC 01:00 執行 (台灣時間 09:00)
+    - cron: '0 1 * * *'
+  workflow_dispatch: # 允許手動觸發
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 🔄 Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas numpy openpyxl google-api-python-client google-auth-httplib2 google-auth-oauthlib
+
+    - name: 🔐 Setup Google Drive credentials
+      env:
+        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+      run: |
+        echo "$GOOGLE_CREDENTIALS" > credentials.json
+        
+    - name: ⬇️ Download latest lottery data from Google Drive
+      env:
+        LOTTERY_HIST_FILE_ID: ${{ secrets.LOTTERY_HIST_FILE_ID }}
+      run: python scripts/download_from_drive.py
+      
+    - name: 📊 Run lottery analysis
+      run: python lottery_analysis_cloud.py
+      
+    - name: ⬆️ Upload results to Google Drive
+      env:
+        PREDICTION_LOG_FILE_ID: ${{ secrets.PREDICTION_LOG_FILE_ID }}
+        GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+      run: python scripts/upload_to_drive.py
+      
+    - name: 📋 Archive results
+      uses: actions/upload-artifact@v3
+      with:
+        name: lottery-results-${{ github.run_number }}
+        path: |
+          prediction_log.xlsx
+          *.log
+        retention-days: 30
