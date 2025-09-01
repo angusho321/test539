@@ -90,34 +90,37 @@ def log_predictions_to_excel(predictions, log_file="prediction_log.xlsx"):
         try:
             existing_df = pd.read_excel(log_file, engine='openpyxl')
             
-            # 檢查今天是否已有記錄
-            today_records = existing_df[existing_df['日期'] == date_str]
+            # 檢查是否有相同日期和時間的記錄（避免重複執行產生的記錄）
+            same_datetime_records = existing_df[
+                (existing_df['日期'] == date_str) & 
+                (existing_df['時間'] == time_str)
+            ]
             
-            if len(today_records) > 0:
-                # 今天已有記錄，覆蓋最新的一筆
-                latest_today_index = today_records.index[-1]
+            if len(same_datetime_records) > 0:
+                # 有相同日期時間的記錄，更新最新的一筆（避免重複執行覆蓋）
+                latest_same_datetime_index = same_datetime_records.index[-1]
                 
                 # 保留已驗證的結果（如果有的話）
-                old_record = existing_df.loc[latest_today_index]
+                old_record = existing_df.loc[latest_same_datetime_index]
                 if pd.notna(old_record.get('驗證結果', '')) and old_record.get('驗證結果', '') != '':
                     log_data['驗證結果'] = old_record['驗證結果']
                     log_data['中獎號碼數'] = old_record['中獎號碼數']
-                    log_data['備註'] = f"上午預測（保留驗證結果） - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}"
-                    logger.info("🔄 更新今日預測，保留已驗證結果")
+                    log_data['備註'] = f"相同時間更新（保留驗證結果） - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}"
+                    logger.info("🔄 更新相同日期時間記錄，保留已驗證結果")
                 else:
-                    logger.info("🔄 更新今日預測")
+                    logger.info("🔄 更新相同日期時間記錄")
                 
-                # 覆蓋該記錄
+                # 更新該記錄
                 for key, value in log_data.items():
                     if key in existing_df.columns:
-                        existing_df.loc[latest_today_index, key] = value
+                        existing_df.loc[latest_same_datetime_index, key] = value
                     else:
                         existing_df[key] = ''
-                        existing_df.loc[latest_today_index, key] = value
+                        existing_df.loc[latest_same_datetime_index, key] = value
                 
                 combined_df = existing_df
             else:
-                # 今天沒有記錄，新增
+                # 沒有相同日期時間的記錄，新增一筆
                 new_df = pd.DataFrame([log_data])
                 
                 # 檢查是否有新欄位需要添加到現有數據
