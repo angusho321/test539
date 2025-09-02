@@ -32,9 +32,29 @@ def compute_num_frequency(df: pd.DataFrame):
     return freq
 
 def get_hot_cold_numbers(freq: pd.Series, top_n=6, bottom_n=6):
-    """取得熱號冷號"""
-    hot_numbers = freq.nlargest(top_n).index.tolist()
-    cold_numbers = freq.nsmallest(bottom_n).index.tolist()
+    """取得熱號冷號，確保不重複"""
+    # 排序所有號碼按頻率
+    sorted_freq = freq.sort_values(ascending=False)
+    
+    # 取前 top_n 個作為熱號
+    hot_numbers = sorted_freq.head(top_n).index.tolist()
+    
+    # 取後 bottom_n 個作為冷號，但排除已在熱號中的
+    all_numbers = sorted_freq.index.tolist()
+    cold_candidates = []
+    
+    # 從最低頻率開始選取，避免與熱號重複
+    for num in reversed(all_numbers):
+        if num not in hot_numbers and len(cold_candidates) < bottom_n:
+            cold_candidates.append(num)
+    
+    cold_numbers = sorted(cold_candidates)
+    
+    # 驗證無重複
+    overlap = set(hot_numbers) & set(cold_numbers)
+    if overlap:
+        logger.warning(f"⚠️ 熱號冷號重複: {overlap}")
+    
     return hot_numbers, cold_numbers
 
 def compute_weighted_frequency(df, decay_factor=0.95, recent_days=365):
@@ -128,7 +148,7 @@ def suggest_numbers(strategy='smart', n=9, historical_stats=None, df=None):
                     
                     # 根據權重選號
                     selected = np.random.choice(numbers, size=n, replace=False, p=weights)
-                    result = sorted(selected.tolist())
+                    result = sorted([int(x) for x in selected.tolist()])  # 確保都是 int
                     logger.info(f"🧠 時間加權智能選號: {result}")
                     return result
             except Exception as e:
@@ -143,13 +163,14 @@ def suggest_numbers(strategy='smart', n=9, historical_stats=None, df=None):
                 if never_drawn:
                     # 隨機選擇一個從未開出的組合
                     selected_combo = random.choice(never_drawn)
-                    result = list(selected_combo)
+                    result = [int(x) for x in selected_combo]  # 確保所有元素都是 int
                     # 如果號碼不足，隨機補充
                     if len(result) < n:
                         remaining = [num for num in numbers if num not in result]
                         result.extend(random.sample(remaining, n - len(result)))
-                    logger.info(f"💎 從未開出組合選號: {sorted(result[:n])}")
-                    return sorted(result[:n])
+                    final_result = sorted([int(x) for x in result[:n]])  # 再次確保都是 int
+                    logger.info(f"💎 從未開出組合選號: {final_result}")
+                    return final_result
             except Exception as e:
                 logger.warning(f"⚠️ 從未開出組合選號失敗: {e}")
         
@@ -179,7 +200,7 @@ def find_never_drawn_combinations(df, combo_size=5, sample_size=100):
         max_attempts = sample_size * 20
         
         while len(never_drawn) < sample_size and attempts < max_attempts:
-            random_combo = tuple(sorted(np.random.choice(range(1, 40), combo_size, replace=False)))
+            random_combo = tuple(sorted([int(x) for x in np.random.choice(range(1, 40), combo_size, replace=False)]))
             attempts += 1
             
             if random_combo not in historical_combinations:
