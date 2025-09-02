@@ -82,6 +82,11 @@ jobs:
       run: |
         echo "$GOOGLE_CREDENTIALS" > credentials.json
         
+    - name: ⬇️ Download existing lottery history
+      env:
+        LOTTERY_HIST_FILE_ID: ${{ secrets.LOTTERY_HIST_FILE_ID }}
+      run: python scripts/download_from_drive.py
+        
     - name: 🎯 Crawl latest lottery results
       run: python lottery_crawler.py
       

@@ -411,16 +411,54 @@ class Lottery539Crawler:
             print("🔄 使用 TaiwanLotteryCrawler 套件獲取最新記錄...")
             lottery = TaiwanLotteryCrawler()
             
-            # 獲取當前月份的記錄
+            # 檢查是否已有歷史檔案
+            excel_path = Path(excel_file)
+            if excel_path.exists():
+                existing_df = pd.read_excel(excel_file, engine='openpyxl')
+                existing_df['日期'] = pd.to_datetime(existing_df['日期'])
+                latest_date = existing_df['日期'].max()
+                print(f"📊 現有歷史記錄: {len(existing_df)} 筆，最新日期: {latest_date.date()}")
+            else:
+                print("📄 沒有現有歷史檔案，將獲取完整記錄")
+                latest_date = pd.to_datetime('2019-01-01')
+            
+            # 獲取當前月份的記錄，但只保留比現有記錄更新的
             current_date = datetime.now()
             current_month_data = lottery.daily_cash([str(current_date.year), f"{current_date.month:02d}"])
             
             if current_month_data and len(current_month_data) > 0:
-                print(f"✅ 獲取到 {len(current_month_data)} 筆當月記錄")
+                print(f"📅 獲取到 {len(current_month_data)} 筆當月記錄")
+                
+                # 如果有現有記錄，只保留比最新記錄更新的資料
+                if excel_path.exists():
+                    filtered_data = []
+                    for record in current_month_data:
+                        try:
+                            record_date = pd.to_datetime(record['開獎日期'])
+                            if record_date > latest_date:
+                                filtered_data.append(record)
+                        except:
+                            continue
+                    
+                    if filtered_data:
+                        print(f"🆕 找到 {len(filtered_data)} 筆新記錄")
+                        all_new_data = filtered_data
+                    else:
+                        print("📋 沒有比現有記錄更新的資料")
+                        return True  # 沒有新資料但不算失敗
+                else:
+                    all_new_data = current_month_data
+                    
+            else:
+                print("❌ 無法獲取當月記錄")
+                return False
+            
+            if all_new_data:
+                print(f"✅ 準備更新 {len(all_new_data)} 筆新記錄")
                 
                 # 轉換為標準格式
                 standardized_data = []
-                for record in current_month_data:
+                for record in all_new_data:
                     try:
                         draw_date = pd.to_datetime(record['開獎日期'])
                         winning_numbers = record['獎號']
