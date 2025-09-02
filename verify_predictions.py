@@ -193,7 +193,7 @@ def verify_predictions(prediction_log_file="prediction_log.xlsx",
         print(f"   對應開獎: {actual_date} -> {actual_numbers}")
         
         # 驗證各策略的預測結果
-        strategies = ['智能選號', '平衡策略', '隨機選號', '熱號優先', '冷號優先']
+        strategies = ['智能選號', '平衡策略', '隨機選號', '熱號優先', '冷號優先', '未開組合']
         verification_results = []
         max_matches = 0
         best_strategy = ""

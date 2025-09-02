@@ -11,6 +11,8 @@ from pathlib import Path
 from datetime import datetime
 import os
 import logging
+from collections import defaultdict
+from itertools import combinations
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -35,8 +37,56 @@ def get_hot_cold_numbers(freq: pd.Series, top_n=6, bottom_n=6):
     cold_numbers = freq.nsmallest(bottom_n).index.tolist()
     return hot_numbers, cold_numbers
 
-def suggest_numbers(strategy='smart', n=9, historical_stats=None):
-    """產生建議號碼 (簡化版本)"""
+def compute_weighted_frequency(df, decay_factor=0.95, recent_days=365):
+    """
+    計算時間加權的號碼頻率
+    越近期的記錄權重越高，避免資料鈍化問題
+    """
+    try:
+        # 只取最近的記錄
+        cutoff_date = datetime.now() - pd.Timedelta(days=recent_days)
+        recent_df = df[df['日期'] >= cutoff_date].copy()
+        
+        if len(recent_df) == 0:
+            logger.warning("⚠️ 沒有足夠的近期記錄，使用全部資料")
+            recent_df = df.copy()
+        
+        logger.info(f"⚖️ 使用最近 {len(recent_df)} 筆記錄進行加權分析")
+        
+        # 計算每筆記錄距今的天數
+        today = datetime.now()
+        recent_df['days_ago'] = (today - recent_df['日期']).dt.days
+        
+        # 計算加權頻率
+        weighted_freq = defaultdict(float)
+        total_weight = 0
+        
+        for _, row in recent_df.iterrows():
+            # 計算權重：越近期權重越高
+            weight = decay_factor ** row['days_ago']
+            total_weight += weight
+            
+            # 累加每個號碼的加權頻率
+            for col in ['號碼1', '號碼2', '號碼3', '號碼4', '號碼5']:
+                if pd.notna(row[col]):
+                    number = int(row[col])
+                    weighted_freq[number] += weight
+        
+        # 正規化頻率
+        if total_weight > 0:
+            for num in weighted_freq:
+                weighted_freq[num] = weighted_freq[num] / total_weight
+        
+        logger.info(f"✅ 完成時間加權分析，衰減係數: {decay_factor}")
+        
+        return dict(weighted_freq)
+        
+    except Exception as e:
+        logger.error(f"❌ 時間加權計算失敗: {e}")
+        return {}
+
+def suggest_numbers(strategy='smart', n=9, historical_stats=None, df=None):
+    """產生建議號碼 (升級版本，支援時間加權)"""
     numbers = list(range(1, 40))
     global hot_numbers, cold_numbers
 
@@ -58,8 +108,89 @@ def suggest_numbers(strategy='smart', n=9, historical_stats=None):
             remain = [x for x in numbers if x not in sel]
             sel += random.sample(remain, n - len(sel))
             return sorted(sel)
-    else:  # smart or balanced
+    elif strategy == 'smart':
+        # 新的時間加權智能選號
+        if df is not None:
+            try:
+                weighted_freq = compute_weighted_frequency(df)
+                if weighted_freq:
+                    # 根據加權頻率選號
+                    weights = [weighted_freq.get(num, 0.001) for num in numbers]
+                    
+                    # 加入隨機性避免過度依賴歷史
+                    randomness_factor = 0.3
+                    for i in range(len(weights)):
+                        weights[i] = weights[i] * (1 - randomness_factor) + random.random() * randomness_factor
+                    
+                    # 正規化權重
+                    weights = np.array(weights)
+                    weights = weights / weights.sum()
+                    
+                    # 根據權重選號
+                    selected = np.random.choice(numbers, size=n, replace=False, p=weights)
+                    result = sorted(selected.tolist())
+                    logger.info(f"🧠 時間加權智能選號: {result}")
+                    return result
+            except Exception as e:
+                logger.warning(f"⚠️ 時間加權選號失敗，使用隨機選號: {e}")
+        
         return sorted(random.sample(numbers, n))
+    elif strategy == 'never_drawn':
+        # 從未開出組合策略
+        if df is not None:
+            try:
+                never_drawn = find_never_drawn_combinations(df, sample_size=100)
+                if never_drawn:
+                    # 隨機選擇一個從未開出的組合
+                    selected_combo = random.choice(never_drawn)
+                    result = list(selected_combo)
+                    # 如果號碼不足，隨機補充
+                    if len(result) < n:
+                        remaining = [num for num in numbers if num not in result]
+                        result.extend(random.sample(remaining, n - len(result)))
+                    logger.info(f"💎 從未開出組合選號: {sorted(result[:n])}")
+                    return sorted(result[:n])
+            except Exception as e:
+                logger.warning(f"⚠️ 從未開出組合選號失敗: {e}")
+        
+        return sorted(random.sample(numbers, n))
+    else:  # balanced
+        return sorted(random.sample(numbers, n))
+
+def find_never_drawn_combinations(df, combo_size=5, sample_size=100):
+    """找出從未開出的號碼組合"""
+    try:
+        # 提取所有歷史開獎組合
+        historical_combinations = set()
+        
+        for _, row in df.iterrows():
+            numbers = []
+            for col in ['號碼1', '號碼2', '號碼3', '號碼4', '號碼5']:
+                if pd.notna(row[col]):
+                    numbers.append(int(row[col]))
+            
+            if len(numbers) == 5:
+                combo = tuple(sorted(numbers))
+                historical_combinations.add(combo)
+        
+        # 隨機生成並檢查從未開出的組合
+        never_drawn = []
+        attempts = 0
+        max_attempts = sample_size * 20
+        
+        while len(never_drawn) < sample_size and attempts < max_attempts:
+            random_combo = tuple(sorted(np.random.choice(range(1, 40), combo_size, replace=False)))
+            attempts += 1
+            
+            if random_combo not in historical_combinations:
+                never_drawn.append(random_combo)
+        
+        logger.info(f"💎 找到 {len(never_drawn)} 個從未開出的組合")
+        return never_drawn
+        
+    except Exception as e:
+        logger.error(f"❌ 分析從未開出組合失敗: {e}")
+        return []
 
 def log_predictions_to_excel(predictions, log_file="prediction_log.xlsx"):
     """記錄預測結果 (僅預測版本)"""
@@ -76,11 +207,13 @@ def log_predictions_to_excel(predictions, log_file="prediction_log.xlsx"):
         '隨機選號': str(predictions.get('random', [])),
         '熱號優先': str(predictions.get('hot', [])),
         '冷號優先': str(predictions.get('cold', [])),
+        '未開組合': str(predictions.get('never_drawn', [])),
         '智能選號_前5號': str(predictions.get('smart', [])[:5]) if predictions.get('smart') else '',
         '平衡策略_前5號': str(predictions.get('balanced', [])[:5]) if predictions.get('balanced') else '',
+        '未開組合_前5號': str(predictions.get('never_drawn', [])[:5]) if predictions.get('never_drawn') else '',
         '驗證結果': '',  # 留空，等待晚上驗證
         '中獎號碼數': '',  # 留空，等待驗證
-        '備註': f"上午預測 - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}"
+        '備註': f"上午預測(含時間加權+未開組合) - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}"
     }
     
     # 檢查檔案是否存在
@@ -210,13 +343,22 @@ def main():
         logger.info(f"❄️ 冷號: {cold_numbers}")
         
         # 生成各策略的建議號碼
-        strategies = ['smart', 'balanced', 'random', 'hot', 'cold']
+        strategies = ['smart', 'balanced', 'random', 'hot', 'cold', 'never_drawn']
+        strategy_names = {
+            'smart': '智能選號',
+            'balanced': '平衡策略', 
+            'random': '隨機選號',
+            'hot': '熱號優先',
+            'cold': '冷號優先',
+            'never_drawn': '未開組合'
+        }
         predictions = {}
         
         for strategy in strategies:
-            numbers = suggest_numbers(strategy, n=9)
+            numbers = suggest_numbers(strategy, n=9, df=df)  # 傳遞 DataFrame
             predictions[strategy] = numbers
-            logger.info(f"📋 {strategy.upper()}: {numbers}")
+            display_name = strategy_names.get(strategy, strategy.upper())
+            logger.info(f"📋 {display_name}: {numbers}")
         
         # 記錄預測結果
         success = log_predictions_to_excel(predictions, "prediction_log.xlsx")
