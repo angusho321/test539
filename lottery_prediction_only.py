@@ -23,15 +23,28 @@ def load_lottery_excel(excel_path: str):
     """讀入 .xlsx 開獎紀錄"""
     return pd.read_excel(excel_path, engine='openpyxl')
 
-def compute_num_frequency(df: pd.DataFrame):
-    """回傳每個號碼的頻次"""
-    nums = df[['號碼1','號碼2','號碼3','號碼4','號碼5']].values.ravel()
+def compute_num_frequency(df: pd.DataFrame, recent_periods=None):
+    """
+    回傳每個號碼的頻次
+    Args:
+        df: 彩票歷史資料
+        recent_periods: 只計算最近N期的資料，None表示使用全部資料
+    """
+    # 如果指定了近期期數，只取最近的記錄
+    if recent_periods is not None and recent_periods > 0:
+        analysis_df = df.tail(recent_periods).copy()
+        logger.info(f"📊 使用最近 {len(analysis_df)} 期資料計算熱號冷號")
+    else:
+        analysis_df = df.copy()
+        logger.info(f"📊 使用全部 {len(analysis_df)} 期資料計算熱號冷號")
+    
+    nums = analysis_df[['號碼1','號碼2','號碼3','號碼4','號碼5']].values.ravel()
     freq = pd.Series(nums).value_counts().sort_index()
     freq.index.name = '號碼'
     freq.name = '頻次'
     return freq
 
-def get_hot_cold_numbers(freq: pd.Series, top_n=6, bottom_n=6):
+def get_hot_cold_numbers(freq: pd.Series, top_n=9, bottom_n=9):
     """取得熱號冷號，確保不重複"""
     # 排序所有號碼按頻率
     sorted_freq = freq.sort_values(ascending=False)
@@ -113,20 +126,32 @@ def suggest_numbers(strategy='smart', n=9, historical_stats=None, df=None):
     if strategy == 'random':
         return sorted(random.sample(numbers, n))
     elif strategy == 'hot':
+        # 熱號策略：直接使用熱號（已確保有9個）
         sel = hot_numbers.copy()
         if len(sel) >= n:
             return sorted(random.sample(sel, n))
         else:
-            remain = [x for x in numbers if x not in sel]
-            sel += random.sample(remain, n - len(sel))
+            # 如果熱號不足，從中性號碼池補足（排除冷號）
+            neutral_numbers = [x for x in numbers if x not in hot_numbers and x not in cold_numbers]
+            remain = neutral_numbers.copy()
+            if len(remain) >= (n - len(sel)):
+                sel += random.sample(remain, n - len(sel))
+            else:
+                sel += remain  # 如果中性號碼也不足，全部加入
             return sorted(sel)
     elif strategy == 'cold':
+        # 冷號策略：直接使用冷號（已確保有9個）
         sel = cold_numbers.copy()
         if len(sel) >= n:
             return sorted(random.sample(sel, n))
         else:
-            remain = [x for x in numbers if x not in sel]
-            sel += random.sample(remain, n - len(sel))
+            # 如果冷號不足，從中性號碼池補足（排除熱號）
+            neutral_numbers = [x for x in numbers if x not in hot_numbers and x not in cold_numbers]
+            remain = neutral_numbers.copy()
+            if len(remain) >= (n - len(sel)):
+                sel += random.sample(remain, n - len(sel))
+            else:
+                sel += remain  # 如果中性號碼也不足，全部加入
             return sorted(sel)
     elif strategy == 'smart':
         # 新的時間加權智能選號
@@ -355,10 +380,12 @@ def main():
         df = load_lottery_excel(excel_file)
         logger.info(f"📊 成功載入 {len(df)} 筆歷史資料")
         
-        # 基本統計
-        freq_series = compute_num_frequency(df)
+        # 基本統計 - 使用最近期數計算熱號冷號
+        recent_periods = 50  # 可調整：建議50-200期之間
+        logger.info(f"🎯 分析範圍：最近 {recent_periods} 期開獎記錄")
+        freq_series = compute_num_frequency(df, recent_periods=recent_periods)
         global hot_numbers, cold_numbers
-        hot_numbers, cold_numbers = get_hot_cold_numbers(freq_series, top_n=6, bottom_n=6)
+        hot_numbers, cold_numbers = get_hot_cold_numbers(freq_series, top_n=9, bottom_n=9)
         
         logger.info(f"🔥 熱號: {hot_numbers}")
         logger.info(f"❄️ 冷號: {cold_numbers}")

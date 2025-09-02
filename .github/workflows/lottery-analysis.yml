@@ -2,17 +2,17 @@ name: 🎲 539 Lottery Automation
 
 on:
   schedule:
-    # 上午 9:00 (台灣時間) - 預測階段
-    - cron: '0 1 * * *'   # UTC 01:00 = 台灣時間 09:00
-    # 晚上 10:00 (台灣時間) - 記錄驗證階段  
-    - cron: '0 14 * * *'  # UTC 14:00 = 台灣時間 22:00
+    # 上午 9:05 (台灣時間) - 預測階段 (避開整點高峰)
+    - cron: '5 1 * * *'   # UTC 01:05 = 台灣時間 09:05
+    # 晚上 21:25 (台灣時間) - 記錄驗證階段
+    - cron: '25 13 * * *'  # UTC 13:25 = 台灣時間 21:25
   workflow_dispatch: # 允許手動觸發
 
 jobs:
   # 上午執行：生成預測（週一到週六）
   morning-prediction:
     runs-on: ubuntu-latest
-    if: (github.event.schedule == '0 1 * * *' || github.event_name == 'workflow_dispatch')
+    if: (github.event.schedule == '5 1 * * *' || github.event_name == 'workflow_dispatch')
     
     steps:
     - name: 🔄 Checkout repository
@@ -60,7 +60,7 @@ jobs:
   # 晚上執行：記錄開獎結果並驗證（週一到週六）
   evening-verification:
     runs-on: ubuntu-latest
-    if: (github.event.schedule == '0 14 * * *' || github.event_name == 'workflow_dispatch')
+    if: (github.event.schedule == '25 13 * * *' || github.event_name == 'workflow_dispatch')
     
     steps:
     - name: 🔄 Checkout repository
