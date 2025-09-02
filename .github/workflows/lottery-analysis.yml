@@ -87,6 +87,25 @@ jobs:
         LOTTERY_HIST_FILE_ID: ${{ secrets.LOTTERY_HIST_FILE_ID }}
       run: python scripts/download_from_drive.py
         
+    - name: 🔄 Ensure complete lottery history (one-time setup)
+      run: |
+        echo "📊 檢查歷史記錄完整性..."
+        python -c "
+        import pandas as pd
+        from pathlib import Path
+        if Path('lottery_hist.xlsx').exists():
+            df = pd.read_excel('lottery_hist.xlsx')
+            print(f'目前記錄筆數: {len(df)}')
+            if len(df) < 1500:
+                print('⚠️ 記錄不完整，執行完整更新...')
+                exit(1)
+            else:
+                print('✅ 歷史記錄完整')
+        else:
+            print('❌ 沒有歷史檔案')
+            exit(1)
+        " || python scripts/update_lottery_history_with_taiwanlottery.py
+        
     - name: 🎯 Crawl latest lottery results
       run: python lottery_crawler.py
       

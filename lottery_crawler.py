@@ -338,9 +338,12 @@ class Lottery539Crawler:
                 # 合併資料
                 combined_df = pd.concat([existing_df, new_data], ignore_index=True)
                 
-                # 去重（基於所有欄位）
+                # 去重（基於日期）
                 before_count = len(combined_df)
-                combined_df = combined_df.drop_duplicates()
+                if '日期' in combined_df.columns:
+                    combined_df = combined_df.drop_duplicates(subset=['日期'], keep='last')
+                else:
+                    combined_df = combined_df.drop_duplicates()
                 after_count = len(combined_df)
                 
                 if before_count > after_count:
