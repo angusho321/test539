@@ -12,6 +12,15 @@ import re
 import time
 import json
 
+# 嘗試導入 TaiwanLotteryCrawler 作為備用
+try:
+    from TaiwanLottery import TaiwanLotteryCrawler
+    TAIWAN_LOTTERY_AVAILABLE = True
+    print("✅ TaiwanLotteryCrawler 套件可用")
+except ImportError:
+    TAIWAN_LOTTERY_AVAILABLE = False
+    print("⚠️ TaiwanLotteryCrawler 套件不可用，使用原有爬蟲方法")
+
 class Lottery539Crawler:
     def __init__(self):
         self.base_url = "https://www.pilio.idv.tw"
@@ -393,12 +402,75 @@ class Lottery539Crawler:
         print("❌ 直接下載失敗")
         return None
 
+    def crawl_with_taiwan_lottery(self, excel_file="lottery_hist.xlsx"):
+        """使用 TaiwanLotteryCrawler 套件獲取最新記錄"""
+        if not TAIWAN_LOTTERY_AVAILABLE:
+            return False
+            
+        try:
+            print("🔄 使用 TaiwanLotteryCrawler 套件獲取最新記錄...")
+            lottery = TaiwanLotteryCrawler()
+            
+            # 獲取當前月份的記錄
+            current_date = datetime.now()
+            current_month_data = lottery.daily_cash([str(current_date.year), f"{current_date.month:02d}"])
+            
+            if current_month_data and len(current_month_data) > 0:
+                print(f"✅ 獲取到 {len(current_month_data)} 筆當月記錄")
+                
+                # 轉換為標準格式
+                standardized_data = []
+                for record in current_month_data:
+                    try:
+                        draw_date = pd.to_datetime(record['開獎日期'])
+                        winning_numbers = record['獎號']
+                        
+                        if len(winning_numbers) >= 5:
+                            weekday_map = {0: '一', 1: '二', 2: '三', 3: '四', 4: '五', 5: '六', 6: '日'}
+                            weekday = weekday_map[draw_date.weekday()]
+                            
+                            standardized_record = {
+                                '日期': draw_date,
+                                '星期': weekday,
+                                '號碼1': winning_numbers[0],
+                                '號碼2': winning_numbers[1],
+                                '號碼3': winning_numbers[2],
+                                '號碼4': winning_numbers[3],
+                                '號碼5': winning_numbers[4],
+                                '期別': record.get('期別', '')
+                            }
+                            standardized_data.append(standardized_record)
+                    except Exception as e:
+                        print(f"⚠️ 處理記錄時發生錯誤: {e}")
+                        continue
+                
+                if standardized_data:
+                    new_df = pd.DataFrame(standardized_data)
+                    success = self.update_excel_file(new_df, excel_file)
+                    if success:
+                        print("✅ 使用 TaiwanLotteryCrawler 更新成功")
+                        return True
+            
+        except Exception as e:
+            print(f"❌ TaiwanLotteryCrawler 執行失敗: {e}")
+        
+        return False
+
     def crawl_latest_results(self, excel_file="lottery_hist.xlsx"):
         """爬取最新開獎結果的主要函數"""
         print("🚀 開始爬取539開獎結果...")
         print("="*50)
         
-        # 1. 從pilio網站爬取資料
+        # 1. 優先嘗試使用 TaiwanLotteryCrawler 套件
+        if TAIWAN_LOTTERY_AVAILABLE:
+            taiwan_success = self.crawl_with_taiwan_lottery(excel_file)
+            if taiwan_success:
+                print("\n🎉 使用 TaiwanLotteryCrawler 更新完成！")
+                return True
+            else:
+                print("\n⚠️ TaiwanLotteryCrawler 失敗，嘗試原有方法...")
+        
+        # 2. 從pilio網站爬取資料（備用方法）
         lottery_data = self.crawl_pilio_results()
         if lottery_data is not None and len(lottery_data) > 0:
             success = self.update_excel_file(lottery_data, excel_file)
