@@ -12,7 +12,9 @@ from googleapiclient.http import MediaIoBaseDownload
 import io
 
 def download_prediction_log():
-    """從 Google Drive 下載 prediction_log.xlsx"""
+    """從 Google Drive 下載 prediction_log.xlsx，並與本地檔案合併"""
+    import pandas as pd
+    from pathlib import Path
     
     # 設定 Google Drive API
     SCOPES = ['https://www.googleapis.com/auth/drive']
@@ -31,17 +33,65 @@ def download_prediction_log():
         return False
     
     try:
-        # 下載檔案
+        # 檢查本地是否已有檔案
+        local_file_exists = Path('prediction_log.xlsx').exists()
+        
+        if local_file_exists:
+            print("📁 發現本地預測記錄檔案，準備合併...")
+            # 備份本地檔案
+            local_df = pd.read_excel('prediction_log.xlsx', engine='openpyxl')
+            print(f"📊 本地記錄: {len(local_df)} 筆")
+        
+        # 下載 Google Drive 檔案到暫存名稱
+        temp_filename = 'prediction_log_temp.xlsx'
         request = service.files().get_media(fileId=FILE_ID)
         
-        with open('prediction_log.xlsx', 'wb') as file:
+        with open(temp_filename, 'wb') as file:
             downloader = MediaIoBaseDownload(file, request)
             done = False
             while done is False:
                 status, done = downloader.next_chunk()
                 print(f"⬇️ 下載預測記錄進度: {int(status.progress() * 100)}%")
         
-        print("✅ 成功下載 prediction_log.xlsx")
+        # 讀取下載的檔案
+        remote_df = pd.read_excel(temp_filename, engine='openpyxl')
+        print(f"☁️ 雲端記錄: {len(remote_df)} 筆")
+        
+        # 如果本地有檔案，進行合併
+        if local_file_exists:
+            # 合併本地和雲端資料
+            combined_df = pd.concat([remote_df, local_df], ignore_index=True)
+            
+            # 去重（基於日期和時間）
+            if '日期' in combined_df.columns and '時間' in combined_df.columns:
+                before_count = len(combined_df)
+                combined_df = combined_df.drop_duplicates(subset=['日期', '時間'], keep='last')
+                after_count = len(combined_df)
+                
+                if before_count > after_count:
+                    print(f"🔄 移除了 {before_count - after_count} 筆重複記錄")
+            
+            # 按日期時間排序
+            if '日期' in combined_df.columns:
+                try:
+                    combined_df['日期'] = pd.to_datetime(combined_df['日期'])
+                    combined_df = combined_df.sort_values(['日期', '時間'])
+                except:
+                    print("⚠️ 無法按日期排序")
+            
+            final_df = combined_df
+            print(f"🔗 合併後記錄: {len(final_df)} 筆")
+        else:
+            final_df = remote_df
+            print("📥 使用雲端記錄")
+        
+        # 儲存最終檔案
+        final_df.to_excel('prediction_log.xlsx', index=False, engine='openpyxl')
+        
+        # 清理暫存檔案
+        Path(temp_filename).unlink()
+        
+        print("✅ 成功下載並合併預測記錄")
         return True
         
     except Exception as e:
