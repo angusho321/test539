@@ -62,14 +62,21 @@ def download_prediction_log():
             # 合併本地和雲端資料
             combined_df = pd.concat([remote_df, local_df], ignore_index=True)
             
-            # 去重（基於日期和時間）
-            if '日期' in combined_df.columns and '時間' in combined_df.columns:
+            # 去重（只基於日期，保留同一天的不同時間記錄）
+            if '日期' in combined_df.columns:
                 before_count = len(combined_df)
-                combined_df = combined_df.drop_duplicates(subset=['日期', '時間'], keep='last')
+                # 只有在日期和時間都完全相同時才去重
+                if '時間' in combined_df.columns:
+                    combined_df = combined_df.drop_duplicates(subset=['日期', '時間'], keep='last')
+                else:
+                    # 如果沒有時間欄位，只基於日期去重
+                    combined_df = combined_df.drop_duplicates(subset=['日期'], keep='last')
                 after_count = len(combined_df)
                 
                 if before_count > after_count:
-                    print(f"🔄 移除了 {before_count - after_count} 筆重複記錄")
+                    print(f"🔄 移除了 {before_count - after_count} 筆完全重複的記錄")
+                
+                print(f"📊 合併後保留: {len(combined_df)} 筆記錄")
             
             # 按日期時間排序
             if '日期' in combined_df.columns:
