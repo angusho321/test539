@@ -42,16 +42,38 @@ def download_prediction_log():
             local_df = pd.read_excel('prediction_log.xlsx', engine='openpyxl')
             print(f"📊 本地記錄: {len(local_df)} 筆")
         
-        # 下載 Google Drive 檔案到暫存名稱
+        # 檢查檔案類型並下載
         temp_filename = 'prediction_log_temp.xlsx'
-        request = service.files().get_media(fileId=FILE_ID)
         
-        with open(temp_filename, 'wb') as file:
-            downloader = MediaIoBaseDownload(file, request)
-            done = False
-            while done is False:
-                status, done = downloader.next_chunk()
-                print(f"⬇️ 下載預測記錄進度: {int(status.progress() * 100)}%")
+        # 獲取檔案資訊
+        file_metadata = service.files().get(fileId=FILE_ID).execute()
+        mime_type = file_metadata.get('mimeType', '')
+        
+        print(f"📄 檔案類型: {mime_type}")
+        
+        if 'spreadsheet' in mime_type or 'google-apps' in mime_type:
+            # Google Sheets 檔案，需要使用 export
+            print("📊 檢測到 Google Sheets，使用 export 下載...")
+            request = service.files().export_media(
+                fileId=FILE_ID,
+                mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            
+            # Google Sheets export 不支援 MediaIoBaseDownload，直接下載
+            with open(temp_filename, 'wb') as file:
+                file.write(request.execute())
+            print("✅ Google Sheets 下載完成")
+        else:
+            # 一般檔案，使用 get_media
+            print("📁 檢測到一般檔案，使用 get_media 下載...")
+            request = service.files().get_media(fileId=FILE_ID)
+            
+            with open(temp_filename, 'wb') as file:
+                downloader = MediaIoBaseDownload(file, request)
+                done = False
+                while done is False:
+                    status, done = downloader.next_chunk()
+                    print(f"⬇️ 下載預測記錄進度: {int(status.progress() * 100)}%")
         
         # 讀取下載的檔案
         remote_df = pd.read_excel(temp_filename, engine='openpyxl')

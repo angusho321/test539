@@ -54,10 +54,11 @@ def upload_to_google_drive():
                 
                 # 嘗試取得檔案資訊
                 file_info = service.files().get(fileId=original_file_id, 
-                                               fields='id,name,parents,permissions').execute()
+                                               fields='id,name,parents,permissions,mimeType').execute()
                 print(f"📄 檔案資訊: {file_info.get('name')}")
                 print(f"📁 檔案 ID: {file_info.get('id')}")
                 print(f"📂 父資料夾: {file_info.get('parents', ['根目錄'])}")
+                print(f"📄 檔案類型: {file_info.get('mimeType')}")
                 
                 # 檢查權限
                 try:
@@ -69,10 +70,19 @@ def upload_to_google_drive():
                 except Exception as perm_error:
                     print(f"⚠️ 無法讀取權限: {str(perm_error)}")
                 
-                # 更新現有檔案（推薦方式，避免服務帳號儲存限制）
-                print(f"🔄 開始更新檔案...")
-                media = MediaFileUpload('prediction_log.xlsx',
-                                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                # 根據檔案類型選擇上傳方式
+                target_mime_type = file_info.get('mimeType', '')
+                
+                if 'spreadsheet' in target_mime_type or 'google-apps' in target_mime_type:
+                    # 目標是 Google Sheets，上傳為 Google Sheets
+                    print(f"📊 更新 Google Sheets...")
+                    media = MediaFileUpload('prediction_log.xlsx',
+                                          mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                else:
+                    # 目標是一般 Excel 檔案
+                    print(f"📁 更新 Excel 檔案...")
+                    media = MediaFileUpload('prediction_log.xlsx',
+                                          mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
                 
                 updated_file = service.files().update(fileId=original_file_id,
                                                      media_body=media,
