@@ -39,6 +39,11 @@ jobs:
         LOTTERY_HIST_FILE_ID: ${{ secrets.LOTTERY_HIST_FILE_ID }}
       run: python scripts/download_from_drive.py
       
+    - name: ⬇️ Download existing prediction log
+      env:
+        PREDICTION_LOG_FILE_ID: ${{ secrets.PREDICTION_LOG_FILE_ID }}
+      run: python scripts/download_prediction_log.py
+      
     - name: 📊 Generate daily predictions
       run: python lottery_prediction_only.py
       
