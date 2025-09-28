@@ -200,8 +200,105 @@ def suggest_numbers(strategy='smart', n=9, historical_stats=None, df=None):
                 logger.warning(f"⚠️ 從未開出組合選號失敗: {e}")
         
         return sorted(random.sample(numbers, n))
+    elif strategy == 'fusion':
+        # 融合策略：綜合多個策略的優勢
+        if df is not None:
+            return create_fusion_strategy(df, n)
+        else:
+            # 備用方案：隨機選擇
+            return sorted(random.sample(numbers, n))
     else:  # balanced
         return sorted(random.sample(numbers, n))
+
+def create_fusion_strategy(df, n=9):
+    """創建融合策略：綜合多個策略的優勢"""
+    try:
+        from collections import Counter, defaultdict
+        
+        # 計算熱號冷號
+        freq_series = compute_num_frequency(df, recent_periods=50)
+        hot_numbers, cold_numbers = get_hot_cold_numbers(freq_series, top_n=9, bottom_n=9)
+        
+        # 1. 分析各策略的號碼偏好
+        strategy_preferences = {}
+        strategies = ['智能選號', '平衡策略', '隨機選號', '熱號優先', '冷號優先', '未開組合']
+        
+        # 模擬各策略的選號偏好
+        strategy_preferences['智能選號'] = Counter()
+        strategy_preferences['平衡策略'] = Counter()
+        strategy_preferences['隨機選號'] = Counter()
+        strategy_preferences['熱號優先'] = Counter(hot_numbers)
+        strategy_preferences['冷號優先'] = Counter(cold_numbers)
+        strategy_preferences['未開組合'] = Counter()
+        
+        # 2. 基於歷史數據分析號碼表現
+        number_scores = defaultdict(float)
+        
+        # 維度1: 策略一致性 (多個策略都選中的號碼得分更高)
+        for strategy, preferences in strategy_preferences.items():
+            for number in preferences:
+                number_scores[number] += 1
+        
+        # 維度2: 歷史中獎表現
+        if '驗證結果' in df.columns:
+            verified_df = df[df['驗證結果'].notna() & (df['驗證結果'] != '')]
+            winning_numbers = []
+            for _, row in verified_df.iterrows():
+                # 解析驗證結果中的中獎號碼
+                result_str = str(row['驗證結果'])
+                if '[' in result_str and ']' in result_str:
+                    try:
+                        numbers_str = result_str.split('[')[1].split(']')[0]
+                        numbers = [int(x.strip()) for x in numbers_str.split(',') if x.strip().isdigit()]
+                        winning_numbers.extend(numbers)
+                    except:
+                        pass
+            
+            winning_freq = Counter(winning_numbers)
+            for number, count in winning_freq.items():
+                number_scores[number] += count * 0.5  # 中獎號碼額外加分
+        
+        # 維度3: 時間權重 (最近的表現權重更高)
+        df['日期'] = pd.to_datetime(df['日期'])
+        recent_df = df[df['日期'] >= df['日期'].max() - pd.Timedelta(days=7)]
+        
+        for _, row in recent_df.iterrows():
+            for col in ['號碼1', '號碼2', '號碼3', '號碼4', '號碼5']:
+                if pd.notna(row[col]):
+                    number_scores[int(row[col])] += 0.3  # 最近出現的號碼加分
+        
+        # 3. 生成融合策略預測
+        if number_scores:
+            # 選擇得分最高的號碼
+            top_numbers = sorted(number_scores.items(), key=lambda x: x[1], reverse=True)
+            selected_numbers = [num for num, _ in top_numbers[:n]]
+            
+            # 如果號碼不足，隨機補充
+            if len(selected_numbers) < n:
+                remaining = [num for num in range(1, 40) if num not in selected_numbers]
+                selected_numbers.extend(random.sample(remaining, n - len(selected_numbers)))
+            
+            result = sorted(selected_numbers[:n])
+            logger.info(f"🔗 融合策略選號: {result}")
+            return result
+        else:
+            # 備用方案：智能選號 + 隨機選號
+            smart_count = n // 2
+            random_count = n - smart_count
+            
+            smart_numbers = hot_numbers[:smart_count] if len(hot_numbers) >= smart_count else hot_numbers
+            random_numbers = random.sample([x for x in range(1, 40) if x not in smart_numbers], random_count)
+            
+            result = sorted(smart_numbers + random_numbers)
+            logger.info(f"🔗 融合策略選號(備用): {result}")
+            return result
+            
+    except Exception as e:
+        logger.warning(f"⚠️ 融合策略選號失敗: {e}")
+        # 備用方案：平衡策略
+        hot_count = n // 2
+        cold_count = n - hot_count
+        return sorted(hot_numbers[:hot_count] + cold_numbers[:cold_count])
 
 def find_never_drawn_combinations(df, combo_size=5, sample_size=100):
     """找出從未開出的號碼組合"""
@@ -254,9 +351,7 @@ def log_predictions_to_excel(predictions, log_file="prediction_log.xlsx"):
         '熱號優先': str(predictions.get('hot', [])),
         '冷號優先': str(predictions.get('cold', [])),
         '未開組合': str(predictions.get('never_drawn', [])),
-        '智能選號_前5號': str(predictions.get('smart', [])[:5]) if predictions.get('smart') else '',
-        '平衡策略_前5號': str(predictions.get('balanced', [])[:5]) if predictions.get('balanced') else '',
-        '未開組合_前5號': str(predictions.get('never_drawn', [])[:5]) if predictions.get('never_drawn') else '',
+        '融合策略': str(predictions.get('fusion', [])),
         '驗證結果': '',  # 留空，等待晚上驗證
         '中獎號碼數': '',  # 留空，等待驗證
         '備註': f"上午預測(含時間加權+未開組合) - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}"
@@ -391,14 +486,15 @@ def main():
         logger.info(f"❄️ 冷號: {cold_numbers}")
         
         # 生成各策略的建議號碼
-        strategies = ['smart', 'balanced', 'random', 'hot', 'cold', 'never_drawn']
+        strategies = ['smart', 'balanced', 'random', 'hot', 'cold', 'never_drawn', 'fusion']
         strategy_names = {
             'smart': '智能選號',
             'balanced': '平衡策略', 
             'random': '隨機選號',
             'hot': '熱號優先',
             'cold': '冷號優先',
-            'never_drawn': '未開組合'
+            'never_drawn': '未開組合',
+            'fusion': '融合策略'
         }
         predictions = {}
         

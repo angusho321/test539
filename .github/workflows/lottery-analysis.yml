@@ -2,70 +2,15 @@ name: 🎲 539 Lottery Automation
 
 on:
   schedule:
-    # 上午 9:00 (台灣時間) - 預測階段
+    # 上午 9:00 (台灣時間) - 完整流程：記錄開獎+驗證昨日+預測今日
     - cron: '0 1 * * *'   # UTC 01:00 = 台灣時間 09:00
-    # 晚上 21:30 (台灣時間) - 記錄驗證階段
-    - cron: '30 13 * * *'  # UTC 13:30 = 台灣時間 21:30
   workflow_dispatch: # 允許手動觸發
 
 jobs:
-  # 上午執行：生成預測（週一到週六）
-  morning-prediction:
+  # 早上執行：記錄開獎+驗證昨日+預測今日（週一到週六）
+  daily-lottery-process:
     runs-on: ubuntu-latest
     if: (github.event.schedule == '0 1 * * *' || github.event_name == 'workflow_dispatch')
-    
-    steps:
-    - name: 🔄 Checkout repository
-      uses: actions/checkout@v4
-      
-    - name: 🐍 Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-        
-    - name: 📦 Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas numpy openpyxl google-api-python-client google-auth-httplib2 google-auth-oauthlib taiwanlottery>=1.5.1
-
-    - name: 🔐 Setup Google Drive credentials
-      env:
-        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-      run: |
-        echo "$GOOGLE_CREDENTIALS" > credentials.json
-        
-    - name: ⬇️ Download historical lottery data
-      env:
-        LOTTERY_HIST_FILE_ID: ${{ secrets.LOTTERY_HIST_FILE_ID }}
-      run: python scripts/download_from_drive.py
-      
-    - name: ⬇️ Download existing prediction log
-      env:
-        PREDICTION_LOG_FILE_ID: ${{ secrets.PREDICTION_LOG_FILE_ID }}
-      run: python scripts/download_prediction_log.py
-      
-    - name: 📊 Generate daily predictions
-      run: python lottery_prediction_only.py
-      
-    - name: ⬆️ Upload predictions to Google Drive
-      env:
-        PREDICTION_LOG_FILE_ID: ${{ secrets.PREDICTION_LOG_FILE_ID }}
-        GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
-      run: python scripts/upload_to_drive.py
-      
-    - name: 📋 Archive predictions
-      uses: actions/upload-artifact@v4
-      with:
-        name: morning-predictions-${{ github.run_number }}
-        path: |
-          prediction_log.xlsx
-          *.log
-        retention-days: 30
-
-  # 晚上執行：記錄開獎結果並驗證（週一到週六）
-  evening-verification:
-    runs-on: ubuntu-latest
-    if: (github.event.schedule == '30 13 * * *' || github.event_name == 'workflow_dispatch')
     
     steps:
     - name: 🔄 Checkout repository
@@ -87,6 +32,7 @@ jobs:
       run: |
         echo "$GOOGLE_CREDENTIALS" > credentials.json
         
+    # 步驟 1: 記錄昨天的開獎號碼
     - name: ⬇️ Download existing lottery history
       env:
         LOTTERY_HIST_FILE_ID: ${{ secrets.LOTTERY_HIST_FILE_ID }}
@@ -111,7 +57,7 @@ jobs:
             exit(1)
         " || python scripts/update_lottery_history_with_taiwanlottery.py
         
-    - name: 🎯 Crawl latest lottery results
+    - name: 🎯 Crawl latest lottery results (記錄昨天開獎)
       run: python lottery_crawler.py
       
     - name: ⬆️ Update lottery history to Google Drive
@@ -119,23 +65,29 @@ jobs:
         LOTTERY_HIST_FILE_ID: ${{ secrets.LOTTERY_HIST_FILE_ID }}
       run: python scripts/upload_lottery_hist.py
       
+    # 步驟 2: 驗證昨日的預測
     - name: ⬇️ Download prediction log
       env:
         PREDICTION_LOG_FILE_ID: ${{ secrets.PREDICTION_LOG_FILE_ID }}
       run: python scripts/download_prediction_log.py
       
-    - name: 🔍 Verify predictions
+    - name: 🔍 Verify yesterday's predictions
       run: python verify_predictions.py
       
-    - name: ⬆️ Update verification results
+    # 步驟 3: 預測今日的號碼
+    - name: 📊 Generate today's predictions
+      run: python lottery_prediction_only.py
+      
+    - name: ⬆️ Upload all results to Google Drive
       env:
         PREDICTION_LOG_FILE_ID: ${{ secrets.PREDICTION_LOG_FILE_ID }}
+        GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
       run: python scripts/upload_to_drive.py
       
-    - name: 📋 Archive verification results
+    - name: 📋 Archive daily results
       uses: actions/upload-artifact@v4
       with:
-        name: evening-verification-${{ github.run_number }}
+        name: daily-lottery-process-${{ github.run_number }}
         path: |
           lottery_hist.xlsx
           prediction_log.xlsx
