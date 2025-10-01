@@ -22,7 +22,7 @@ def is_lottery_draw_day(check_date=None):
         try:
             check_date = datetime.strptime(check_date, "%Y-%m-%d")
         except:
-            print(f"⚠️ 日期格式錯誤: {check_date}")
+            print(f"日期格式錯誤: {check_date}")
             return True  # 預設為開獎日
     
     # 取得星期幾 (0=週一, 6=週日)
@@ -32,10 +32,10 @@ def is_lottery_draw_day(check_date=None):
     is_draw_day = weekday < 6
     
     weekday_names = ['週一', '週二', '週三', '週四', '週五', '週六', '週日']
-    print(f"📅 檢查日期: {check_date.strftime('%Y-%m-%d')} ({weekday_names[weekday]})")
+    print(f"檢查日期: {check_date.strftime('%Y-%m-%d')} ({weekday_names[weekday]})")
     
     if is_draw_day:
-        print(f"✅ {weekday_names[weekday]} 是開獎日")
+        print(f"{weekday_names[weekday]} 是開獎日")
     else:
         print(f"⏸️ {weekday_names[weekday]} 不開獎，跳過驗證")
     
@@ -46,7 +46,7 @@ def load_latest_lottery_results(excel_path: str):
     try:
         df = pd.read_excel(excel_path, engine='openpyxl')
         if len(df) == 0:
-            print("❌ 開獎資料檔案為空")
+            print("開獎資料檔案為空")
             return None
         
         # 取得最新一期的開獎結果
@@ -55,14 +55,14 @@ def load_latest_lottery_results(excel_path: str):
                          latest_row['號碼4'], latest_row['號碼5']]
         latest_date = latest_row.get('日期', '未知日期')
         
-        print(f"📋 最新開獎結果 ({latest_date}):")
+        print(f"最新開獎結果 ({latest_date}):")
         print(f"   開獎號碼: {sorted(latest_numbers)}")
         return {
             'date': latest_date,
             'numbers': sorted(latest_numbers)
         }
     except Exception as e:
-        print(f"❌ 讀取開獎資料時發生錯誤: {e}")
+        print(f"讀取開獎資料時發生錯誤: {e}")
         return None
 
 def parse_prediction_numbers(prediction_str):
@@ -82,7 +82,7 @@ def parse_prediction_numbers(prediction_str):
         return numbers
         
     except Exception as e:
-        print(f"⚠️ 解析預測號碼時發生錯誤: {prediction_str} -> {e}")
+        print(f"解析預測號碼時發生錯誤: {prediction_str} -> {e}")
         return []
 
 def count_matching_numbers(prediction_numbers, actual_numbers):
@@ -105,34 +105,34 @@ def verify_predictions(prediction_log_file="prediction_log.xlsx",
         lottery_results_file: 開獎結果檔案
         days_to_verify: 驗證過去幾天的預測記錄
     """
-    print("🔍 開始驗證預測結果...")
+    print("開始驗證預測結果...")
     
     # 檢查檔案是否存在
     if not Path(prediction_log_file).exists():
-        print("❌ 找不到預測記錄檔案")
+        print("找不到預測記錄檔案")
         return
     
     if not Path(lottery_results_file).exists():
-        print("❌ 找不到開獎結果檔案")
+        print("找不到開獎結果檔案")
         return
     
     # 讀取預測記錄
     try:
         predictions_df = pd.read_excel(prediction_log_file, engine='openpyxl')
-        print(f"📊 找到 {len(predictions_df)} 筆預測記錄")
+        print(f"找到 {len(predictions_df)} 筆預測記錄")
     except Exception as e:
-        print(f"❌ 讀取預測記錄時發生錯誤: {e}")
+        print(f"讀取預測記錄時發生錯誤: {e}")
         return
     
     # 讀取開獎結果資料
     try:
         lottery_df = pd.read_excel(lottery_results_file, engine='openpyxl')
         if len(lottery_df) == 0:
-            print("❌ 開獎結果檔案為空")
+            print("開獎結果檔案為空")
             return
-        print(f"📋 開獎資料包含 {len(lottery_df)} 期結果")
+        print(f"開獎資料包含 {len(lottery_df)} 期結果")
     except Exception as e:
-        print(f"❌ 讀取開獎結果時發生錯誤: {e}")
+        print(f"讀取開獎結果時發生錯誤: {e}")
         return
     
     # 尋找需要驗證的記錄
@@ -155,7 +155,7 @@ def verify_predictions(prediction_log_file="prediction_log.xlsx",
                 continue  # 超過驗證期限
                 
         except Exception as e:
-            print(f"⚠️ 解析預測日期時發生錯誤: {row.get('日期', 'N/A')} -> {e}")
+            print(f"解析預測日期時發生錯誤: {row.get('日期', 'N/A')} -> {e}")
             continue
         
         # 尋找對應日期的開獎結果
@@ -173,7 +173,7 @@ def verify_predictions(prediction_log_file="prediction_log.xlsx",
                 continue
         
         if matching_lottery is None:
-            print(f"📅 {prediction_date_str} 的預測尚無對應開獎結果，跳過驗證")
+            print(f"{prediction_date_str} 的預測尚無對應開獎結果，跳過驗證")
             continue
         
         # 提取開獎號碼
@@ -186,10 +186,10 @@ def verify_predictions(prediction_log_file="prediction_log.xlsx",
             actual_numbers = sorted([int(x) for x in actual_numbers if pd.notna(x)])
             actual_date = matching_lottery.get('日期', '未知日期')
         except Exception as e:
-            print(f"⚠️ 解析開獎號碼時發生錯誤: {e}")
+            print(f"解析開獎號碼時發生錯誤: {e}")
             continue
         
-        print(f"\n🎯 驗證 {prediction_date_str} 的預測...")
+        print(f"\n驗證 {prediction_date_str} 的預測...")
         print(f"   對應開獎: {actual_date} -> {actual_numbers}")
         
         # 驗證各策略的預測結果
@@ -202,16 +202,17 @@ def verify_predictions(prediction_log_file="prediction_log.xlsx",
             if strategy in row and pd.notna(row[strategy]):
                 prediction_numbers = parse_prediction_numbers(str(row[strategy]))
                 if prediction_numbers:
-                    # 取前5個號碼進行比對（對應539開獎格式）
-                    prediction_5 = sorted(prediction_numbers[:5])
-                    matches = count_matching_numbers(prediction_5, actual_numbers)
+                    # 所有策略都應該比對全部9個號碼與開獎的5個號碼
+                    prediction_to_compare = sorted(prediction_numbers)
+                    
+                    matches = count_matching_numbers(prediction_to_compare, actual_numbers)
                     verification_results.append(f"{strategy}:{matches}中")
                     
                     if matches > max_matches:
                         max_matches = matches
                         best_strategy = strategy
                     
-                    print(f"   {strategy}: {prediction_5} -> {matches}個號碼符合")
+                    print(f"   {strategy}: {prediction_to_compare} -> {matches}個號碼符合")
         
         # 更新驗證結果
         if verification_results:
@@ -246,18 +247,18 @@ def verify_predictions(prediction_log_file="prediction_log.xlsx",
     if updates_made:
         try:
             predictions_df.to_excel(prediction_log_file, index=False, engine='openpyxl')
-            print(f"\n✅ 已更新 {verification_count} 筆預測記錄的驗證結果")
+            print(f"\n已更新 {verification_count} 筆預測記錄的驗證結果")
         except Exception as e:
-            print(f"❌ 儲存驗證結果時發生錯誤: {e}")
+            print(f"儲存驗證結果時發生錯誤: {e}")
     else:
-        print("\n📝 沒有找到需要驗證的記錄")
+        print("\n沒有找到需要驗證的記錄")
     
     # 顯示驗證統計
     show_verification_statistics(predictions_df)
 
 def show_verification_statistics(predictions_df):
     """顯示驗證統計結果"""
-    print(f"\n📈 驗證統計結果:")
+    print(f"\n驗證統計結果:")
     
     # 篩選已驗證的記錄
     verified_df = predictions_df[pd.notna(predictions_df.get('中獎號碼數', '')) & 
@@ -287,11 +288,11 @@ def auto_verify_on_startup(prediction_log_file="prediction_log.xlsx",
     print("\n🔄 自動檢查是否有需要驗證的預測記錄...")
     
     if not Path(prediction_log_file).exists():
-        print("📝 尚無預測記錄檔案")
+        print("尚無預測記錄檔案")
         return
     
     if not Path(lottery_results_file).exists():
-        print("📝 尚無開獎結果檔案")
+        print("尚無開獎結果檔案")
         return
     
     # 檢查是否有可驗證的記錄
@@ -300,11 +301,11 @@ def auto_verify_on_startup(prediction_log_file="prediction_log.xlsx",
         lottery_df = pd.read_excel(lottery_results_file, engine='openpyxl')
         
         if len(predictions_df) == 0:
-            print("📝 預測記錄檔案為空")
+            print("預測記錄檔案為空")
             return
             
         if len(lottery_df) == 0:
-            print("📝 開獎結果檔案為空")
+            print("開獎結果檔案為空")
             return
         
         # 檢查是否有未驗證的記錄
@@ -314,17 +315,17 @@ def auto_verify_on_startup(prediction_log_file="prediction_log.xlsx",
         ].shape[0]
         
         if unverified_count == 0:
-            print("✅ 所有預測記錄都已驗證")
+            print("所有預測記錄都已驗證")
             return
         
-        print(f"📋 找到 {unverified_count} 筆未驗證的預測記錄")
+        print(f"找到 {unverified_count} 筆未驗證的預測記錄")
         
         # 檢查最新開獎日期
         latest_lottery_date = pd.to_datetime(lottery_df['日期']).max()
         today = pd.Timestamp.now().normalize()
         
-        print(f"📅 最新開獎日期: {latest_lottery_date.strftime('%Y-%m-%d')}")
-        print(f"📅 今日日期: {today.strftime('%Y-%m-%d')}")
+        print(f"最新開獎日期: {latest_lottery_date.strftime('%Y-%m-%d')}")
+        print(f"今日日期: {today.strftime('%Y-%m-%d')}")
         
         # 檢查昨天是否為開獎日
         yesterday = datetime.now() - timedelta(days=1)
@@ -339,18 +340,18 @@ def auto_verify_on_startup(prediction_log_file="prediction_log.xlsx",
             print("⏰ 今日尚無開獎結果，跳過自動驗證")
             
     except Exception as e:
-        print(f"❌ 自動驗證檢查時發生錯誤: {e}")
+        print(f"自動驗證檢查時發生錯誤: {e}")
         return
 
 if __name__ == "__main__":
-    print("🎯 539彩票預測驗證系統")
+    print("539彩票預測驗證系統")
     print("="*50)
     
     # 執行驗證
     verify_predictions()
     
     print("\n" + "="*50)
-    print("💡 使用說明:")
+    print("使用說明:")
     print("1. 每次有新的開獎結果時，執行此程式進行驗證")
     print("2. 程式會自動比對預測記錄與最新開獎結果")
     print("3. 驗證結果會自動更新到 prediction_log.xlsx")
