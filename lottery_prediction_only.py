@@ -118,8 +118,8 @@ def compute_weighted_frequency(df, decay_factor=0.95, recent_days=365):
         logger.error(f"❌ 時間加權計算失敗: {e}")
         return {}
 
-def suggest_numbers(strategy='smart', n=9, historical_stats=None, df=None):
-    """產生建議號碼 (簡化版本，只保留智能選號和平衡策略)"""
+def suggest_numbers(strategy='smart', n=9, historical_stats=None, df=None, randomness_factor=0.3):
+    """產生建議號碼 (A/B測試版本，支援不同隨機因子)"""
     numbers = list(range(1, 40))
     global hot_numbers, cold_numbers
 
@@ -132,8 +132,7 @@ def suggest_numbers(strategy='smart', n=9, historical_stats=None, df=None):
                     # 根據加權頻率選號
                     weights = [weighted_freq.get(num, 0.001) for num in numbers]
                     
-                    # 加入隨機性避免過度依賴歷史
-                    randomness_factor = 0.3
+                    # 加入隨機性避免過度依賴歷史（可調整的隨機因子）
                     for i in range(len(weights)):
                         weights[i] = weights[i] * (1 - randomness_factor) + random.random() * randomness_factor
                     
@@ -144,7 +143,7 @@ def suggest_numbers(strategy='smart', n=9, historical_stats=None, df=None):
                     # 根據權重選號
                     selected = np.random.choice(numbers, size=n, replace=False, p=weights)
                     result = sorted([int(x) for x in selected.tolist()])  # 確保都是 int
-                    logger.info(f"🧠 時間加權智能選號: {result}")
+                    logger.info(f"🧠 時間加權智能選號 (隨機因子:{randomness_factor}): {result}")
                     return result
             except Exception as e:
                 logger.warning(f"⚠️ 時間加權選號失敗，使用隨機選號: {e}")
@@ -153,7 +152,7 @@ def suggest_numbers(strategy='smart', n=9, historical_stats=None, df=None):
     elif strategy == 'balanced':
         # 平衡策略：純隨機選號（受益於智能選號的隨機狀態污染）
         result = sorted(random.sample(numbers, n))
-        logger.info(f"⚖️ 平衡策略: {result}")
+        logger.info(f"⚖️ 平衡策略 (隨機因子:{randomness_factor}): {result}")
         return result
     else:
         # 其他策略暫不使用
@@ -195,16 +194,27 @@ def log_predictions_to_excel(predictions, log_file="prediction_log.xlsx"):
     date_str = current_time.strftime("%Y-%m-%d")
     time_str = current_time.strftime("%H:%M:%S")
     
-    # 準備記錄數據 - 記錄四個策略
+    # 準備記錄數據 - A/B測試版本
     log_data = {
         '日期': date_str,
         '時間': time_str,
-        '智能選號_九顆': str(predictions.get('smart', [])),
-        '智能選號_七顆': str(predictions.get('smart_7', [])),
-        '平衡策略_九顆': str(predictions.get('balanced', [])),
-        '平衡策略_七顆': str(predictions.get('balanced_7', [])),
+        # 隨機因子 0.2 版本
+        '智能選號_九顆_0.2': str(predictions.get('smart_9_0.2', [])),
+        '智能選號_七顆_0.2': str(predictions.get('smart_7_0.2', [])),
+        '平衡策略_九顆_0.2': str(predictions.get('balanced_9_0.2', [])),
+        '平衡策略_七顆_0.2': str(predictions.get('balanced_7_0.2', [])),
+        # 隨機因子 0.3 版本（原始版本）
+        '智能選號_九顆_0.3': str(predictions.get('smart_9_0.3', [])),
+        '智能選號_七顆_0.3': str(predictions.get('smart_7_0.3', [])),
+        '平衡策略_九顆_0.3': str(predictions.get('balanced_9_0.3', [])),
+        '平衡策略_七顆_0.3': str(predictions.get('balanced_7_0.3', [])),
+        # 隨機因子 0.4 版本
+        '智能選號_九顆_0.4': str(predictions.get('smart_9_0.4', [])),
+        '智能選號_七顆_0.4': str(predictions.get('smart_7_0.4', [])),
+        '平衡策略_九顆_0.4': str(predictions.get('balanced_9_0.4', [])),
+        '平衡策略_七顆_0.4': str(predictions.get('balanced_7_0.4', [])),
         '中獎號碼數': '',  # 留空，等待驗證
-        '備註': f"預測系統(智能+平衡_九顆七顆) - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}",
+        '備註': f"A/B測試(隨機因子0.2/0.3/0.4) - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}",
         '驗證結果': ''  # 留空，等待驗證
     }
     
@@ -336,27 +346,41 @@ def main():
         logger.info(f"🔥 熱號: {hot_numbers}")
         logger.info(f"❄️ 冷號: {cold_numbers}")
         
-        # 生成各策略的建議號碼
-        strategies = ['smart', 'balanced']
-        strategy_names = {
-            'smart': '智能選號_九顆',
-            'balanced': '平衡策略_九顆'
-        }
+        # A/B測試：同時運行三個不同隨機因子的版本
+        randomness_factors = [0.2, 0.3, 0.4]  # A/B測試的三個版本
         predictions = {}
         
-        # 先生成九顆策略
-        for strategy in strategies:
-            numbers = suggest_numbers(strategy, n=9, df=df)  # 傳遞 DataFrame
-            predictions[strategy] = numbers
-            display_name = strategy_names.get(strategy, strategy.upper())
-            logger.info(f"📋 {display_name}: {numbers}")
+        logger.info("🧪 開始A/B測試 - 三個隨機因子版本")
+        logger.info("="*60)
         
-        # 再生成七顆策略（基於九顆選號，選取加權最高的七顆）
-        predictions['smart_7'] = select_top_weighted_numbers(predictions['smart'], df, n=7)
-        predictions['balanced_7'] = select_top_weighted_numbers(predictions['balanced'], df, n=7)
+        # 保存初始隨機狀態
+        initial_state = random.getstate()
         
-        logger.info(f"📋 智能選號_七顆: {predictions['smart_7']}")
-        logger.info(f"📋 平衡策略_七顆: {predictions['balanced_7']}")
+        for factor in randomness_factors:
+            logger.info(f"🎯 測試隨機因子: {factor}")
+            
+            # 為每個版本恢復到初始隨機狀態，確保完全獨立
+            random.setstate(initial_state)
+            
+            # 生成九顆策略
+            smart_9 = suggest_numbers('smart', n=9, df=df, randomness_factor=factor)
+            balanced_9 = suggest_numbers('balanced', n=9, df=df, randomness_factor=factor)
+            
+            # 生成七顆策略（基於九顆選號）
+            smart_7 = select_top_weighted_numbers(smart_9, df, n=7)
+            balanced_7 = select_top_weighted_numbers(balanced_9, df, n=7)
+            
+            # 儲存結果
+            predictions[f'smart_9_{factor}'] = smart_9
+            predictions[f'smart_7_{factor}'] = smart_7
+            predictions[f'balanced_9_{factor}'] = balanced_9
+            predictions[f'balanced_7_{factor}'] = balanced_7
+            
+            logger.info(f"📋 智能選號_九顆 (因子:{factor}): {smart_9}")
+            logger.info(f"📋 智能選號_七顆 (因子:{factor}): {smart_7}")
+            logger.info(f"📋 平衡策略_九顆 (因子:{factor}): {balanced_9}")
+            logger.info(f"📋 平衡策略_七顆 (因子:{factor}): {balanced_7}")
+            logger.info("-" * 40)
         
         # 記錄預測結果
         success = log_predictions_to_excel(predictions, "prediction_log.xlsx")
