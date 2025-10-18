@@ -119,42 +119,12 @@ def compute_weighted_frequency(df, decay_factor=0.95, recent_days=365):
         return {}
 
 def suggest_numbers(strategy='smart', n=9, historical_stats=None, df=None):
-    """產生建議號碼 (升級版本，支援時間加權)"""
+    """產生建議號碼 (簡化版本，只保留智能選號和平衡策略)"""
     numbers = list(range(1, 40))
     global hot_numbers, cold_numbers
 
-    if strategy == 'random':
-        return sorted(random.sample(numbers, n))
-    elif strategy == 'hot':
-        # 熱號策略：直接使用熱號（已確保有9個）
-        sel = hot_numbers.copy()
-        if len(sel) >= n:
-            return sorted(random.sample(sel, n))
-        else:
-            # 如果熱號不足，從中性號碼池補足（排除冷號）
-            neutral_numbers = [x for x in numbers if x not in hot_numbers and x not in cold_numbers]
-            remain = neutral_numbers.copy()
-            if len(remain) >= (n - len(sel)):
-                sel += random.sample(remain, n - len(sel))
-            else:
-                sel += remain  # 如果中性號碼也不足，全部加入
-            return sorted(sel)
-    elif strategy == 'cold':
-        # 冷號策略：直接使用冷號（已確保有9個）
-        sel = cold_numbers.copy()
-        if len(sel) >= n:
-            return sorted(random.sample(sel, n))
-        else:
-            # 如果冷號不足，從中性號碼池補足（排除熱號）
-            neutral_numbers = [x for x in numbers if x not in hot_numbers and x not in cold_numbers]
-            remain = neutral_numbers.copy()
-            if len(remain) >= (n - len(sel)):
-                sel += random.sample(remain, n - len(sel))
-            else:
-                sel += remain  # 如果中性號碼也不足，全部加入
-            return sorted(sel)
-    elif strategy == 'smart':
-        # 新的時間加權智能選號
+    if strategy == 'smart':
+        # 智能選號：時間加權智能選號
         if df is not None:
             try:
                 weighted_freq = compute_weighted_frequency(df)
@@ -180,160 +150,44 @@ def suggest_numbers(strategy='smart', n=9, historical_stats=None, df=None):
                 logger.warning(f"⚠️ 時間加權選號失敗，使用隨機選號: {e}")
         
         return sorted(random.sample(numbers, n))
-    elif strategy == 'never_drawn':
-        # 從未開出組合策略
-        if df is not None:
-            try:
-                never_drawn = find_never_drawn_combinations(df, sample_size=100)
-                if never_drawn:
-                    # 隨機選擇一個從未開出的組合
-                    selected_combo = random.choice(never_drawn)
-                    result = [int(x) for x in selected_combo]  # 確保所有元素都是 int
-                    # 如果號碼不足，隨機補充
-                    if len(result) < n:
-                        remaining = [num for num in numbers if num not in result]
-                        result.extend(random.sample(remaining, n - len(result)))
-                    final_result = sorted([int(x) for x in result[:n]])  # 再次確保都是 int
-                    logger.info(f"💎 從未開出組合選號: {final_result}")
-                    return final_result
-            except Exception as e:
-                logger.warning(f"⚠️ 從未開出組合選號失敗: {e}")
-        
-        return sorted(random.sample(numbers, n))
-    elif strategy == 'fusion':
-        # 融合策略：綜合多個策略的優勢
-        if df is not None:
-            return create_fusion_strategy(df, n)
-        else:
-            # 備用方案：隨機選擇
-            return sorted(random.sample(numbers, n))
-    else:  # balanced
+    elif strategy == 'balanced':
+        # 平衡策略：純隨機選號（受益於智能選號的隨機狀態污染）
+        result = sorted(random.sample(numbers, n))
+        logger.info(f"⚖️ 平衡策略: {result}")
+        return result
+    else:
+        # 其他策略暫不使用
         return sorted(random.sample(numbers, n))
 
-def create_fusion_strategy(df, n=9):
-    """創建融合策略：綜合多個策略的優勢"""
+def select_top_weighted_numbers(nine_numbers, df, n=7):
+    """
+    從九顆號碼中選取加權最高的七顆
+    使用智能選號的加權邏輯來排序九顆號碼
+    """
     try:
-        from collections import Counter, defaultdict
-        
-        # 計算熱號冷號
-        freq_series = compute_num_frequency(df, recent_periods=50)
-        hot_numbers, cold_numbers = get_hot_cold_numbers(freq_series, top_n=9, bottom_n=9)
-        
-        # 1. 分析各策略的號碼偏好
-        strategy_preferences = {}
-        strategies = ['智能選號', '平衡策略', '隨機選號', '熱號優先', '冷號優先', '未開組合']
-        
-        # 模擬各策略的選號偏好
-        strategy_preferences['智能選號'] = Counter()
-        strategy_preferences['平衡策略'] = Counter()
-        strategy_preferences['隨機選號'] = Counter()
-        strategy_preferences['熱號優先'] = Counter(hot_numbers)
-        strategy_preferences['冷號優先'] = Counter(cold_numbers)
-        strategy_preferences['未開組合'] = Counter()
-        
-        # 2. 基於歷史數據分析號碼表現
-        number_scores = defaultdict(float)
-        
-        # 維度1: 策略一致性 (多個策略都選中的號碼得分更高)
-        for strategy, preferences in strategy_preferences.items():
-            for number in preferences:
-                number_scores[number] += 1
-        
-        # 維度2: 歷史中獎表現
-        if '驗證結果' in df.columns:
-            verified_df = df[df['驗證結果'].notna() & (df['驗證結果'] != '')]
-            winning_numbers = []
-            for _, row in verified_df.iterrows():
-                # 解析驗證結果中的中獎號碼
-                result_str = str(row['驗證結果'])
-                if '[' in result_str and ']' in result_str:
-                    try:
-                        numbers_str = result_str.split('[')[1].split(']')[0]
-                        numbers = [int(x.strip()) for x in numbers_str.split(',') if x.strip().isdigit()]
-                        winning_numbers.extend(numbers)
-                    except:
-                        pass
-            
-            winning_freq = Counter(winning_numbers)
-            for number, count in winning_freq.items():
-                number_scores[number] += count * 0.5  # 中獎號碼額外加分
-        
-        # 維度3: 時間權重 (最近的表現權重更高)
-        df['日期'] = pd.to_datetime(df['日期'])
-        recent_df = df[df['日期'] >= df['日期'].max() - pd.Timedelta(days=7)]
-        
-        for _, row in recent_df.iterrows():
-            for col in ['號碼1', '號碼2', '號碼3', '號碼4', '號碼5']:
-                if pd.notna(row[col]):
-                    number_scores[int(row[col])] += 0.3  # 最近出現的號碼加分
-        
-        # 3. 生成融合策略預測
-        if number_scores:
-            # 選擇得分最高的號碼
-            top_numbers = sorted(number_scores.items(), key=lambda x: x[1], reverse=True)
-            selected_numbers = [num for num, _ in top_numbers[:n]]
-            
-            # 如果號碼不足，隨機補充
-            if len(selected_numbers) < n:
-                remaining = [num for num in range(1, 40) if num not in selected_numbers]
-                selected_numbers.extend(random.sample(remaining, n - len(selected_numbers)))
-            
-            result = sorted(selected_numbers[:n])
-            logger.info(f"🔗 融合策略選號: {result}")
-            return result
-        else:
-            # 備用方案：智能選號 + 隨機選號
-            smart_count = n // 2
-            random_count = n - smart_count
-            
-            smart_numbers = hot_numbers[:smart_count] if len(hot_numbers) >= smart_count else hot_numbers
-            random_numbers = random.sample([x for x in range(1, 40) if x not in smart_numbers], random_count)
-            
-            result = sorted(smart_numbers + random_numbers)
-            logger.info(f"🔗 融合策略選號(備用): {result}")
-            return result
-            
+        if df is not None:
+            # 使用與智能選號相同的加權計算
+            weighted_freq = compute_weighted_frequency(df)
+            if weighted_freq:
+                # 計算九顆號碼的加權分數
+                number_scores = []
+                for num in nine_numbers:
+                    score = weighted_freq.get(num, 0.001)
+                    number_scores.append((num, score))
+                
+                # 按加權分數排序（高分在前）
+                number_scores.sort(key=lambda x: x[1], reverse=True)
+                
+                # 選取前七顆
+                top_seven = [num for num, _ in number_scores[:n]]
+                result = sorted(top_seven)
+                logger.info(f"🎯 從九顆中選取加權最高的七顆: {result}")
+                return result
     except Exception as e:
-        logger.warning(f"⚠️ 融合策略選號失敗: {e}")
-        # 備用方案：平衡策略
-        hot_count = n // 2
-        cold_count = n - hot_count
-        return sorted(hot_numbers[:hot_count] + cold_numbers[:cold_count])
-
-def find_never_drawn_combinations(df, combo_size=5, sample_size=100):
-    """找出從未開出的號碼組合"""
-    try:
-        # 提取所有歷史開獎組合
-        historical_combinations = set()
-        
-        for _, row in df.iterrows():
-            numbers = []
-            for col in ['號碼1', '號碼2', '號碼3', '號碼4', '號碼5']:
-                if pd.notna(row[col]):
-                    numbers.append(int(row[col]))
-            
-            if len(numbers) == 5:
-                combo = tuple(sorted(numbers))
-                historical_combinations.add(combo)
-        
-        # 隨機生成並檢查從未開出的組合
-        never_drawn = []
-        attempts = 0
-        max_attempts = sample_size * 20
-        
-        while len(never_drawn) < sample_size and attempts < max_attempts:
-            random_combo = tuple(sorted([int(x) for x in np.random.choice(range(1, 40), combo_size, replace=False)]))
-            attempts += 1
-            
-            if random_combo not in historical_combinations:
-                never_drawn.append(random_combo)
-        
-        logger.info(f"💎 找到 {len(never_drawn)} 個從未開出的組合")
-        return never_drawn
-        
-    except Exception as e:
-        logger.error(f"❌ 分析從未開出組合失敗: {e}")
-        return []
+        logger.warning(f"⚠️ 七顆選號失敗，使用前七顆: {e}")
+    
+    # 備用方案：直接取前七顆
+    return sorted(nine_numbers[:n])
 
 def log_predictions_to_excel(predictions, log_file="prediction_log.xlsx"):
     """記錄預測結果 (僅預測版本)"""
@@ -341,20 +195,17 @@ def log_predictions_to_excel(predictions, log_file="prediction_log.xlsx"):
     date_str = current_time.strftime("%Y-%m-%d")
     time_str = current_time.strftime("%H:%M:%S")
     
-    # 準備記錄數據
+    # 準備記錄數據 - 記錄四個策略
     log_data = {
         '日期': date_str,
         '時間': time_str,
-        '智能選號': str(predictions.get('smart', [])),
-        '平衡策略': str(predictions.get('balanced', [])),
-        '隨機選號': str(predictions.get('random', [])),
-        '熱號優先': str(predictions.get('hot', [])),
-        '冷號優先': str(predictions.get('cold', [])),
-        '未開組合': str(predictions.get('never_drawn', [])),
-        '融合策略': str(predictions.get('fusion', [])),
-        '驗證結果': '',  # 留空，等待晚上驗證
+        '智能選號_九顆': str(predictions.get('smart', [])),
+        '智能選號_七顆': str(predictions.get('smart_7', [])),
+        '平衡策略_九顆': str(predictions.get('balanced', [])),
+        '平衡策略_七顆': str(predictions.get('balanced_7', [])),
         '中獎號碼數': '',  # 留空，等待驗證
-        '備註': f"上午預測(含時間加權+未開組合) - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}"
+        '備註': f"預測系統(智能+平衡_九顆七顆) - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}",
+        '驗證結果': ''  # 留空，等待驗證
     }
     
     # 檢查檔案是否存在
@@ -486,23 +337,26 @@ def main():
         logger.info(f"❄️ 冷號: {cold_numbers}")
         
         # 生成各策略的建議號碼
-        strategies = ['smart', 'balanced', 'random', 'hot', 'cold', 'never_drawn', 'fusion']
+        strategies = ['smart', 'balanced']
         strategy_names = {
-            'smart': '智能選號',
-            'balanced': '平衡策略', 
-            'random': '隨機選號',
-            'hot': '熱號優先',
-            'cold': '冷號優先',
-            'never_drawn': '未開組合',
-            'fusion': '融合策略'
+            'smart': '智能選號_九顆',
+            'balanced': '平衡策略_九顆'
         }
         predictions = {}
         
+        # 先生成九顆策略
         for strategy in strategies:
             numbers = suggest_numbers(strategy, n=9, df=df)  # 傳遞 DataFrame
             predictions[strategy] = numbers
             display_name = strategy_names.get(strategy, strategy.upper())
             logger.info(f"📋 {display_name}: {numbers}")
+        
+        # 再生成七顆策略（基於九顆選號，選取加權最高的七顆）
+        predictions['smart_7'] = select_top_weighted_numbers(predictions['smart'], df, n=7)
+        predictions['balanced_7'] = select_top_weighted_numbers(predictions['balanced'], df, n=7)
+        
+        logger.info(f"📋 智能選號_七顆: {predictions['smart_7']}")
+        logger.info(f"📋 平衡策略_七顆: {predictions['balanced_7']}")
         
         # 記錄預測結果
         success = log_predictions_to_excel(predictions, "prediction_log.xlsx")
