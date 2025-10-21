@@ -203,14 +203,14 @@ def verify_predictions(prediction_log_file="prediction_log.xlsx",
             if pd.notna(row[strategy]) and str(row[strategy]).strip() != '':
                 prediction_numbers = parse_prediction_numbers(str(row[strategy]))
                 if prediction_numbers:
-                    # 對於九顆策略，取前5個號碼與開獎的5個號碼比對
-                    # 對於七顆策略，取前5個號碼與開獎的5個號碼比對
+                    # 九顆策略：用全部9個號碼與開獎的5個號碼比對
+                    # 七顆策略：用全部7個號碼與開獎的5個號碼比對
                     if '九顆' in strategy:
-                        prediction_to_compare = sorted(prediction_numbers[:5])  # 九顆取前5個
+                        prediction_to_compare = sorted(prediction_numbers)  # 九顆用全部9個號碼
                     elif '七顆' in strategy:
-                        prediction_to_compare = sorted(prediction_numbers[:5])  # 七顆取前5個
+                        prediction_to_compare = sorted(prediction_numbers)  # 七顆用全部7個號碼
                     else:
-                        prediction_to_compare = sorted(prediction_numbers[:5])  # 其他策略取前5個
+                        prediction_to_compare = sorted(prediction_numbers)  # 其他策略用全部號碼
                     
                     matches = count_matching_numbers(prediction_to_compare, actual_numbers)
                     verification_results.append(f"{strategy}:{matches}中")
