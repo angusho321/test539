@@ -10,18 +10,11 @@ jobs:
   # 早上執行：記錄開獎+驗證昨日+預測今日（週一到週六）
   daily-lottery-process:
     runs-on: ubuntu-latest
-    # 移除過於嚴格的條件判斷，讓 workflow 正常執行
+    if: (github.event.schedule == '0 1 * * *' || github.event_name == 'workflow_dispatch')
     
     steps:
     - name: 🔄 Checkout repository
       uses: actions/checkout@v4
-      
-    - name: 📅 Debug workflow trigger
-      run: |
-        echo "Workflow triggered by: ${{ github.event_name }}"
-        echo "Schedule: ${{ github.event.schedule }}"
-        echo "Current time: $(date)"
-        echo "UTC time: $(date -u)"
       
     - name: 🐍 Set up Python
       uses: actions/setup-python@v4
@@ -62,7 +55,7 @@ jobs:
         else:
             print('❌ 沒有歷史檔案')
             exit(1)
-        " || (echo "執行完整更新..." && python scripts/update_lottery_history_with_taiwanlottery.py)
+        " || python scripts/update_lottery_history_with_taiwanlottery.py
         
     - name: 🎯 Crawl latest lottery results (記錄昨天開獎)
       run: python lottery_crawler.py
