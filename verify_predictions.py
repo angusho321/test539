@@ -192,18 +192,25 @@ def verify_predictions(prediction_log_file="prediction_log.xlsx",
         print(f"\n驗證 {prediction_date_str} 的預測...")
         print(f"   對應開獎: {actual_date} -> {actual_numbers}")
         
-        # 驗證各策略的預測結果
-        strategies = ['智能選號', '平衡策略', '隨機選號', '熱號優先', '冷號優先', '未開組合', '融合策略']
+        # 驗證各策略的預測結果 - 支援新的A/B測試格式
+        # 檢查所有可能的策略欄位
+        strategy_columns = [col for col in row.index if any(keyword in col for keyword in ['智能選號', '平衡策略', '隨機選號', '熱號優先', '冷號優先', '未開組合', '融合策略', '趨勢適應'])]
         verification_results = []
         max_matches = 0
         best_strategy = ""
         
-        for strategy in strategies:
-            if strategy in row and pd.notna(row[strategy]):
+        for strategy in strategy_columns:
+            if pd.notna(row[strategy]) and str(row[strategy]).strip() != '':
                 prediction_numbers = parse_prediction_numbers(str(row[strategy]))
                 if prediction_numbers:
-                    # 所有策略都應該比對全部9個號碼與開獎的5個號碼
-                    prediction_to_compare = sorted(prediction_numbers)
+                    # 對於九顆策略，取前5個號碼與開獎的5個號碼比對
+                    # 對於七顆策略，取前5個號碼與開獎的5個號碼比對
+                    if '九顆' in strategy:
+                        prediction_to_compare = sorted(prediction_numbers[:5])  # 九顆取前5個
+                    elif '七顆' in strategy:
+                        prediction_to_compare = sorted(prediction_numbers[:5])  # 七顆取前5個
+                    else:
+                        prediction_to_compare = sorted(prediction_numbers[:5])  # 其他策略取前5個
                     
                     matches = count_matching_numbers(prediction_to_compare, actual_numbers)
                     verification_results.append(f"{strategy}:{matches}中")
