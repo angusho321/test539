@@ -58,7 +58,7 @@ jobs:
         " || python fantasy5_crawler.py
         
     - name: 🎯 Crawl latest Fantasy 5 results (記錄昨天開獎)
-      run: python fantasy5_crawler.py
+      run: python fantasy5_daily_crawler.py
       
     - name: ⬆️ Update Fantasy 5 history to Google Drive
       env:
