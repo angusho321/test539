@@ -194,27 +194,16 @@ def log_predictions_to_excel(predictions, log_file="prediction_log.xlsx"):
     date_str = current_time.strftime("%Y-%m-%d")
     time_str = current_time.strftime("%H:%M:%S")
     
-    # 準備記錄數據 - A/B測試版本
+    # 準備記錄數據 - 簡化版本
     log_data = {
         '日期': date_str,
         '時間': time_str,
-        # 隨機因子 0.2 版本
-        '智能選號_九顆_0.2': str(predictions.get('smart_9_0.2', [])),
-        '智能選號_七顆_0.2': str(predictions.get('smart_7_0.2', [])),
-        '平衡策略_九顆_0.2': str(predictions.get('balanced_9_0.2', [])),
-        '平衡策略_七顆_0.2': str(predictions.get('balanced_7_0.2', [])),
-        # 隨機因子 0.3 版本（原始版本）
-        '智能選號_九顆_0.3': str(predictions.get('smart_9_0.3', [])),
-        '智能選號_七顆_0.3': str(predictions.get('smart_7_0.3', [])),
-        '平衡策略_九顆_0.3': str(predictions.get('balanced_9_0.3', [])),
-        '平衡策略_七顆_0.3': str(predictions.get('balanced_7_0.3', [])),
-        # 隨機因子 0.4 版本
-        '智能選號_九顆_0.4': str(predictions.get('smart_9_0.4', [])),
-        '智能選號_七顆_0.4': str(predictions.get('smart_7_0.4', [])),
-        '平衡策略_九顆_0.4': str(predictions.get('balanced_9_0.4', [])),
-        '平衡策略_七顆_0.4': str(predictions.get('balanced_7_0.4', [])),
+        '智能選號_九顆': str(predictions.get('smart_9', [])),
+        '智能選號_七顆': str(predictions.get('smart_7', [])),
+        '平衡策略_九顆': str(predictions.get('balanced_9', [])),
+        '平衡策略_七顆': str(predictions.get('balanced_7', [])),
         '中獎號碼數': '',  # 留空，等待驗證
-        '備註': f"A/B測試(隨機因子0.2/0.3/0.4) - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}",
+        '備註': f"最佳策略(隨機因子0.3) - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}",
         '驗證結果': ''  # 留空，等待驗證
     }
     
@@ -346,41 +335,31 @@ def main():
         logger.info(f"🔥 熱號: {hot_numbers}")
         logger.info(f"❄️ 冷號: {cold_numbers}")
         
-        # A/B測試：同時運行三個不同隨機因子的版本
-        randomness_factors = [0.2, 0.3, 0.4]  # A/B測試的三個版本
+        # 使用最佳隨機因子 0.3
+        randomness_factor = 0.3
         predictions = {}
         
-        logger.info("🧪 開始A/B測試 - 三個隨機因子版本")
+        logger.info("🎯 使用最佳隨機因子: 0.3")
         logger.info("="*60)
         
-        # 保存初始隨機狀態
-        initial_state = random.getstate()
+        # 生成九顆策略
+        smart_9 = suggest_numbers('smart', n=9, df=df, randomness_factor=randomness_factor)
+        balanced_9 = suggest_numbers('balanced', n=9, df=df, randomness_factor=randomness_factor)
         
-        for factor in randomness_factors:
-            logger.info(f"🎯 測試隨機因子: {factor}")
-            
-            # 為每個版本恢復到初始隨機狀態，確保完全獨立
-            random.setstate(initial_state)
-            
-            # 生成九顆策略
-            smart_9 = suggest_numbers('smart', n=9, df=df, randomness_factor=factor)
-            balanced_9 = suggest_numbers('balanced', n=9, df=df, randomness_factor=factor)
-            
-            # 生成七顆策略（基於九顆選號）
-            smart_7 = select_top_weighted_numbers(smart_9, df, n=7)
-            balanced_7 = select_top_weighted_numbers(balanced_9, df, n=7)
-            
-            # 儲存結果
-            predictions[f'smart_9_{factor}'] = smart_9
-            predictions[f'smart_7_{factor}'] = smart_7
-            predictions[f'balanced_9_{factor}'] = balanced_9
-            predictions[f'balanced_7_{factor}'] = balanced_7
-            
-            logger.info(f"📋 智能選號_九顆 (因子:{factor}): {smart_9}")
-            logger.info(f"📋 智能選號_七顆 (因子:{factor}): {smart_7}")
-            logger.info(f"📋 平衡策略_九顆 (因子:{factor}): {balanced_9}")
-            logger.info(f"📋 平衡策略_七顆 (因子:{factor}): {balanced_7}")
-            logger.info("-" * 40)
+        # 生成七顆策略（基於九顆選號）
+        smart_7 = select_top_weighted_numbers(smart_9, df, n=7)
+        balanced_7 = select_top_weighted_numbers(balanced_9, df, n=7)
+        
+        # 儲存結果
+        predictions['smart_9'] = smart_9
+        predictions['smart_7'] = smart_7
+        predictions['balanced_9'] = balanced_9
+        predictions['balanced_7'] = balanced_7
+        
+        logger.info(f"📋 智能選號_九顆: {smart_9}")
+        logger.info(f"📋 智能選號_七顆: {smart_7}")
+        logger.info(f"📋 平衡策略_九顆: {balanced_9}")
+        logger.info(f"📋 平衡策略_七顆: {balanced_7}")
         
         # 記錄預測結果
         success = log_predictions_to_excel(predictions, "prediction_log.xlsx")

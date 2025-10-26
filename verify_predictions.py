@@ -192,7 +192,7 @@ def verify_predictions(prediction_log_file="prediction_log.xlsx",
         print(f"\n驗證 {prediction_date_str} 的預測...")
         print(f"   對應開獎: {actual_date} -> {actual_numbers}")
         
-        # 驗證各策略的預測結果 - 支援新的A/B測試格式
+        # 驗證各策略的預測結果 - 支援簡化後的欄位格式
         # 檢查所有可能的策略欄位
         strategy_columns = [col for col in row.index if any(keyword in col for keyword in ['智能選號', '平衡策略', '隨機選號', '熱號優先', '冷號優先', '未開組合', '融合策略', '趨勢適應'])]
         verification_results = []
