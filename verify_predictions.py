@@ -142,7 +142,7 @@ def verify_predictions(prediction_log_file="prediction_log.xlsx",
     
     for index, row in predictions_df.iterrows():
         # 檢查是否已經驗證過
-        if pd.notna(row.get('驗證結果', '')) and row.get('驗證結果', '') != '':
+        if '驗證結果' in row and pd.notna(row.get('驗證結果', '')) and row.get('驗證結果', '') != '':
             continue
         
         # 檢查預測日期是否在驗證範圍內
@@ -267,9 +267,19 @@ def show_verification_statistics(predictions_df):
     """顯示驗證統計結果"""
     print(f"\n驗證統計結果:")
     
+    # 檢查是否有資料
+    if predictions_df.empty:
+        print("   尚無預測記錄")
+        return
+    
+    # 檢查是否有中獎號碼數欄位
+    if '中獎號碼數' not in predictions_df.columns:
+        print("   尚無已驗證的記錄")
+        return
+    
     # 篩選已驗證的記錄
-    verified_df = predictions_df[pd.notna(predictions_df.get('中獎號碼數', '')) & 
-                                (predictions_df.get('中獎號碼數', '') != '')]
+    verified_df = predictions_df[pd.notna(predictions_df['中獎號碼數']) & 
+                                (predictions_df['中獎號碼數'] != '')]
     
     if len(verified_df) == 0:
         print("   尚無已驗證的記錄")

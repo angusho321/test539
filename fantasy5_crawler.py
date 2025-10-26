@@ -513,6 +513,16 @@ class Fantasy5Crawler:
             
             # 合併記錄
             new_records_df = pd.DataFrame(new_records)
+            
+            # 確保日期格式一致
+            if not existing_df.empty:
+                # 將現有資料的日期轉換為字串格式
+                existing_df['日期'] = existing_df['日期'].astype(str)
+            
+            if not new_records_df.empty:
+                # 將新資料的日期轉換為字串格式
+                new_records_df['日期'] = new_records_df['日期'].astype(str)
+            
             updated_df = pd.concat([existing_df, new_records_df], ignore_index=True)
             
             # 按日期排序
