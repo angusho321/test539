@@ -24,7 +24,14 @@ jobs:
     - name: 📦 Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pandas numpy openpyxl google-api-python-client google-auth-httplib2 google-auth-oauthlib requests beautifulsoup4
+        pip install -r requirements.txt
+        
+    - name: 🌐 Setup Chrome for Selenium
+      run: |
+        wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+        echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+        sudo apt-get update
+        sudo apt-get install -y google-chrome-stable
 
     - name: 🔐 Setup Google Drive credentials
       env:
@@ -58,7 +65,7 @@ jobs:
         " || python fantasy5_crawler.py
         
     - name: 🎯 Crawl latest Fantasy 5 results (記錄昨天開獎)
-      run: python fantasy5_daily_crawler.py
+      run: python fantasy5_crawler.py
       
     - name: ⬆️ Update Fantasy 5 history to Google Drive
       env:

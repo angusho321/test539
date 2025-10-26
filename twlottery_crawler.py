@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-台灣彩券網站加州Fantasy 5爬蟲
-專門用於從 https://twlottery.in/en/lotteryCA5 獲取最新開獎號碼
+加州Fantasy 5爬蟲（從台灣彩券網站）
+專門用於從 https://twlottery.in/en/lotteryCA5 獲取加州Fantasy 5最新開獎號碼
 """
 
 import requests
@@ -22,7 +22,7 @@ from selenium.webdriver.support import expected_conditions as EC
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-class TWLotteryCrawler:
+class Fantasy5Crawler:
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({
@@ -53,7 +53,7 @@ class TWLotteryCrawler:
     
     def crawl_latest_results(self):
         """爬取最新開獎結果"""
-        logger.info("🎯 開始從台灣彩券網站爬取加州Fantasy 5最新開獎結果...")
+        logger.info("🎯 開始爬取加州Fantasy 5最新開獎結果...")
         
         # 首先嘗試使用requests
         results = self.crawl_with_requests()
@@ -459,7 +459,7 @@ class TWLotteryCrawler:
         }
     
     def save_results(self, results):
-        """保存結果到Excel檔案"""
+        """保存結果到Excel檔案，合併到現有歷史檔案"""
         if not results:
             logger.warning("⚠️ 沒有結果可保存")
             return False
@@ -471,19 +471,63 @@ class TWLotteryCrawler:
                 formatted_result = self.format_result(result)
                 formatted_results.append(formatted_result)
             
-            # 建立DataFrame
-            df = pd.DataFrame(formatted_results)
+            # 檢查是否有現有的歷史檔案
+            history_filename = "fantasy5_hist.xlsx"
+            if pd.io.common.file_exists(history_filename):
+                logger.info(f"📁 讀取現有歷史檔案: {history_filename}")
+                try:
+                    existing_df = pd.read_excel(history_filename, engine='openpyxl')
+                    logger.info(f"📊 現有記錄數: {len(existing_df)} 筆")
+                except Exception as e:
+                    logger.warning(f"⚠️ 讀取現有檔案失敗: {e}，將建立新檔案")
+                    existing_df = pd.DataFrame(columns=['日期', '星期', '號碼1', '號碼2', '號碼3', '號碼4', '號碼5', '期別'])
+            else:
+                logger.info("📁 建立新的歷史檔案")
+                existing_df = pd.DataFrame(columns=['日期', '星期', '號碼1', '號碼2', '號碼3', '號碼4', '號碼5', '期別'])
             
-            # 保存到Excel
-            filename = f"twlottery_fantasy5_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-            df.to_excel(filename, index=False, engine='openpyxl')
+            # 建立新結果的DataFrame
+            new_df = pd.DataFrame(formatted_results)
             
-            logger.info(f"✅ 結果已保存到 {filename}")
-            logger.info(f"📊 共保存 {len(formatted_results)} 筆記錄")
+            # 檢查重複記錄
+            new_records = []
+            existing_dates = set()
+            
+            if not existing_df.empty:
+                # 取得現有記錄的日期
+                for _, row in existing_df.iterrows():
+                    date_str = str(row['日期'])[:10]  # 只取日期部分
+                    existing_dates.add(date_str)
+            
+            # 過濾新記錄
+            for _, row in new_df.iterrows():
+                date_str = str(row['日期'])[:10]  # 只取日期部分
+                if date_str not in existing_dates:
+                    new_records.append(row)
+                    logger.info(f"✅ 新增記錄: {date_str} -> {row['號碼1']}, {row['號碼2']}, {row['號碼3']}, {row['號碼4']}, {row['號碼5']}")
+                else:
+                    logger.info(f"⚠️ 跳過重複記錄: {date_str}")
+            
+            if not new_records:
+                logger.info("ℹ️ 沒有新的記錄需要添加")
+                return True
+            
+            # 合併記錄
+            new_records_df = pd.DataFrame(new_records)
+            updated_df = pd.concat([existing_df, new_records_df], ignore_index=True)
+            
+            # 按日期排序
+            updated_df = updated_df.sort_values('日期')
+            
+            # 保存更新後的檔案
+            updated_df.to_excel(history_filename, index=False, engine='openpyxl')
+            
+            logger.info(f"✅ 歷史檔案已更新: {history_filename}")
+            logger.info(f"📊 總記錄數: {len(updated_df)} 筆")
+            logger.info(f"📈 新增記錄數: {len(new_records)} 筆")
             
             # 顯示最新結果
-            if formatted_results:
-                latest = formatted_results[0]
+            if new_records:
+                latest = new_records[-1]  # 最新的記錄
                 logger.info(f"🎯 最新開獎結果:")
                 logger.info(f"   日期: {latest['日期']}")
                 logger.info(f"   號碼: {latest['號碼1']}, {latest['號碼2']}, {latest['號碼3']}, {latest['號碼4']}, {latest['號碼5']}")
@@ -496,10 +540,10 @@ class TWLotteryCrawler:
 
 def main():
     """主程式"""
-    logger.info("🎲 台灣彩券網站加州Fantasy 5爬蟲")
+    logger.info("🎲 加州Fantasy 5爬蟲")
     logger.info("="*60)
     
-    crawler = TWLotteryCrawler()
+    crawler = Fantasy5Crawler()
     
     # 爬取最新開獎結果
     results = crawler.crawl_latest_results()
