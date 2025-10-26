@@ -30,8 +30,25 @@ def download_fantasy5_from_drive():
         return False
     
     try:
-        # 下載檔案
-        request = service.files().get_media(fileId=file_id)
+        # 首先檢查檔案類型
+        file_info = service.files().get(fileId=file_id, fields='mimeType,name').execute()
+        mime_type = file_info.get('mimeType', '')
+        file_name = file_info.get('name', 'unknown')
+        
+        print(f"📄 檔案資訊: {file_name}")
+        print(f"📄 檔案類型: {mime_type}")
+        
+        # 根據檔案類型選擇下載方式
+        if 'spreadsheet' in mime_type or 'google-apps' in mime_type:
+            # Google Sheets檔案，使用Export API
+            print("📊 偵測到Google Sheets檔案，使用Export API下載...")
+            request = service.files().export_media(fileId=file_id, 
+                                                 mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        else:
+            # 一般檔案，使用get_media
+            print("📁 偵測到一般檔案，使用標準下載...")
+            request = service.files().get_media(fileId=file_id)
+        
         file_content = BytesIO()
         downloader = MediaIoBaseDownload(file_content, request)
         
