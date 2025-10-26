@@ -9,3 +9,5 @@ google-auth==2.23.4
 requests==2.31.0
 beautifulsoup4==4.12.2
 taiwanlottery>=1.5.1
+selenium==4.15.2
+pytz==2023.3
