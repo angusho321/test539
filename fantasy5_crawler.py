@@ -51,6 +51,24 @@ class Fantasy5Crawler:
         tw_now = datetime.now(self.tw_timezone)
         return tw_now.date()
     
+    def convert_tw_date_to_ca_date(self, tw_date):
+        """將台灣日期轉換為對應的美國日期（考慮時差）"""
+        try:
+            # 將台灣日期轉換為datetime對象
+            tw_datetime = datetime.combine(tw_date, datetime.min.time())
+            tw_datetime = self.tw_timezone.localize(tw_datetime)
+            
+            # 轉換為加州時間
+            ca_datetime = tw_datetime.astimezone(self.ca_timezone)
+            ca_date = ca_datetime.date()
+            
+            logger.info(f"🕐 時區轉換: 台灣 {tw_date} -> 加州 {ca_date}")
+            return ca_date
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 時區轉換失敗: {e}，使用原日期")
+            return tw_date
+    
     def crawl_latest_results(self):
         """爬取最新開獎結果"""
         logger.info("🎯 開始爬取加州Fantasy 5最新開獎結果...")
@@ -239,6 +257,9 @@ class Fantasy5Crawler:
                 logger.warning("⚠️ 無法解析日期")
                 return None
             
+            # 將台灣日期轉換為美國日期
+            ca_date = self.convert_tw_date_to_ca_date(date_obj)
+            
             # 提取號碼 - 使用BeautifulSoup解析HTML
             element_html = element.get_attribute('outerHTML')
             soup = BeautifulSoup(element_html, 'html.parser')
@@ -262,10 +283,10 @@ class Fantasy5Crawler:
             
             # 只取前5個號碼並排序
             result_numbers = sorted(numbers[:5])
-            logger.info(f"✅ 解析成功: {date_obj} -> {result_numbers}")
+            logger.info(f"✅ 解析成功: 台灣 {date_obj} -> 加州 {ca_date} -> {result_numbers}")
             
             return {
-                'date': date_obj,
+                'date': ca_date,  # 使用轉換後的美國日期
                 'numbers': result_numbers
             }
             
