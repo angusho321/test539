@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 import re
 import time
 import json
+import sys
+import traceback
 
 # 嘗試導入 TaiwanLotteryCrawler 作為備用
 try:
@@ -427,7 +429,30 @@ class Lottery539Crawler:
             
             # 獲取當前月份的記錄，但只保留比現有記錄更新的
             current_date = datetime.now()
-            current_month_data = lottery.daily_cash([str(current_date.year), f"{current_date.month:02d}"])
+            year_str = str(current_date.year)
+            month_str = f"{current_date.month:02d}"
+            
+            print(f"📅 嘗試獲取 {year_str} 年 {month_str} 月的記錄...")
+            
+            try:
+                current_month_data = lottery.daily_cash([year_str, month_str])
+                
+                # 顯示返回值的詳細資訊
+                if current_month_data is None:
+                    print(f"⚠️ daily_cash 返回 None")
+                elif isinstance(current_month_data, list):
+                    print(f"📊 daily_cash 返回列表，長度: {len(current_month_data)}")
+                    if len(current_month_data) > 0:
+                        print(f"   第一筆資料範例: {current_month_data[0] if current_month_data else '無資料'}")
+                else:
+                    print(f"⚠️ daily_cash 返回非預期類型: {type(current_month_data)}")
+                    print(f"   返回值: {current_month_data}")
+                    
+            except Exception as e:
+                print(f"❌ 調用 daily_cash 時發生異常: {e}")
+                print(f"   異常類型: {type(e).__name__}")
+                print(f"   詳細錯誤:\n{traceback.format_exc()}")
+                return False
             
             if current_month_data and len(current_month_data) > 0:
                 print(f"📅 獲取到 {len(current_month_data)} 筆當月記錄")
@@ -454,6 +479,15 @@ class Lottery539Crawler:
                     
             else:
                 print("❌ 無法獲取當月記錄")
+                print(f"   當前日期: {current_date.date()}")
+                print(f"   查詢參數: 年={year_str}, 月={month_str}")
+                if current_month_data is None:
+                    print("   原因: daily_cash() 返回 None")
+                elif isinstance(current_month_data, list) and len(current_month_data) == 0:
+                    print("   原因: daily_cash() 返回空列表（該月份可能還沒有開獎記錄）")
+                else:
+                    print(f"   原因: 返回資料格式不符合預期")
+                    print(f"   返回資料類型: {type(current_month_data)}")
                 return False
             
             if all_new_data:
@@ -494,6 +528,8 @@ class Lottery539Crawler:
             
         except Exception as e:
             print(f"❌ TaiwanLotteryCrawler 執行失敗: {e}")
+            print(f"   異常類型: {type(e).__name__}")
+            print(f"   詳細錯誤:\n{traceback.format_exc()}")
         
         return False
 
@@ -576,7 +612,7 @@ def manual_data_entry():
             print("❌ 手動資料新增失敗")
             return False
             
-    except KeyboardInterrupt:
+    except (EOFError, KeyboardInterrupt):
         print("\n⏹️ 手動輸入已取消")
         return False
     except Exception as e:
@@ -593,11 +629,21 @@ if __name__ == "__main__":
     success = crawler.crawl_latest_results()
     
     if not success:
-        print("\n🤔 自動爬取失敗，是否要手動輸入開獎資料？")
-        choice = input("輸入 'y' 進行手動輸入，其他鍵退出: ").strip().lower()
+        # 檢查是否在互動終端中執行
+        is_interactive = sys.stdin.isatty() and sys.stdout.isatty()
         
-        if choice == 'y':
-            manual_data_entry()
+        if is_interactive:
+            try:
+                print("\n🤔 自動爬取失敗，是否要手動輸入開獎資料？")
+                choice = input("輸入 'y' 進行手動輸入，其他鍵退出: ").strip().lower()
+                
+                if choice == 'y':
+                    manual_data_entry()
+            except (EOFError, KeyboardInterrupt):
+                print("\n⏹️ 已取消手動輸入")
+        else:
+            print("\n⚠️ 自動爬取失敗，且目前處於非互動環境")
+            print("💡 建議稍後再試或使用互動終端執行程式以進行手動輸入")
     
     print("\n" + "="*50)
     print("💡 使用說明:")
