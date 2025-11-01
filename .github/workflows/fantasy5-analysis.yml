@@ -4,7 +4,7 @@ on:
   schedule:
     # 晚上 22:00 (台灣時間) - 加州Fantasy 5完整流程
     - cron: '0 14 * * *'   # UTC 14:00 = 台灣 22:00
-  workflow_dispatch: # 允許手動觸發
+  workflow_dispatch: {} # 允許手動觸發
 
 jobs:
   # 晚上執行：記錄開獎+驗證昨日+預測今日（每日，包括週日）
