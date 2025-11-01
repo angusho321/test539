@@ -14,9 +14,11 @@ import logging
 import pytz
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -108,8 +110,22 @@ class Fantasy5Crawler:
             chrome_options.add_argument('--window-size=1920,1080')
             chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
             
-            # 建立WebDriver
-            driver = webdriver.Chrome(options=chrome_options)
+            # 使用 webdriver-manager 自動下載和匹配正確版本的 chromedriver
+            logger.info("🔧 正在設置 Chrome WebDriver...")
+            try:
+                service = Service(ChromeDriverManager().install())
+                driver = webdriver.Chrome(service=service, options=chrome_options)
+                logger.info("✅ Chrome WebDriver 設置成功")
+            except Exception as e:
+                logger.error(f"❌ Chrome WebDriver 設置失敗: {e}")
+                # 如果 webdriver-manager 失敗，嘗試使用系統預設的 chromedriver
+                logger.info("🔄 嘗試使用系統預設的 Chrome WebDriver...")
+                try:
+                    driver = webdriver.Chrome(options=chrome_options)
+                    logger.info("✅ 使用系統預設 Chrome WebDriver 成功")
+                except Exception as e2:
+                    logger.error(f"❌ 系統預設 Chrome WebDriver 也失敗: {e2}")
+                    raise
             
             logger.info("🌐 使用Selenium開啟瀏覽器...")
             driver.get(self.target_url)
