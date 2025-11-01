@@ -10,7 +10,6 @@ jobs:
   # 早上執行：記錄開獎+驗證昨日+預測今日（週一到週六）
   daily-lottery-process:
     runs-on: ubuntu-latest
-    if: (github.event.schedule == '0 1 * * *' || github.event_name == 'workflow_dispatch')
     
     steps:
     - name: 🔄 Checkout repository

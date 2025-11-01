@@ -10,7 +10,6 @@ jobs:
   # 晚上執行：記錄開獎+驗證昨日+預測今日（每日，包括週日）
   daily-fantasy5-process:
     runs-on: ubuntu-latest
-    if: (github.event.schedule == '0 14 * * *' || github.event_name == 'workflow_dispatch')
     
     steps:
     - name: 🔄 Checkout repository
