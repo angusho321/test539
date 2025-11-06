@@ -170,10 +170,6 @@ class Fantasy5Crawler:
                             element_html = element.get_attribute('outerHTML')
                             logger.info(f"🔍 元素 {i+1} HTML: {element_html[:200]}...")
                             
-                            # 獲取完整的HTML內容
-                            if i < 3:  # 只顯示前3個元素的完整HTML
-                                logger.info(f"🔍 元素 {i+1} 完整HTML: {element_html}")
-                            
                             result = self.parse_selenium_element(element)
                             if result:
                                 results.append(result)
@@ -528,6 +524,7 @@ class Fantasy5Crawler:
             # 檢查重複記錄
             new_records = []
             existing_dates = set()
+            seen_new_dates = set()  # 追蹤新記錄中已處理的日期，避免新記錄之間重複
             
             if not existing_df.empty:
                 # 取得現有記錄的日期
@@ -535,14 +532,17 @@ class Fantasy5Crawler:
                     date_str = str(row['日期'])[:10]  # 只取日期部分
                     existing_dates.add(date_str)
             
-            # 過濾新記錄
+            # 過濾新記錄（同時檢查與現有記錄的重複，以及新記錄之間的重複）
             for _, row in new_df.iterrows():
                 date_str = str(row['日期'])[:10]  # 只取日期部分
-                if date_str not in existing_dates:
+                if date_str not in existing_dates and date_str not in seen_new_dates:
                     new_records.append(row)
+                    seen_new_dates.add(date_str)  # 標記此日期已處理
                     logger.info(f"✅ 新增記錄: {date_str} -> {row['號碼1']}, {row['號碼2']}, {row['號碼3']}, {row['號碼4']}, {row['號碼5']}")
+                elif date_str in existing_dates:
+                    logger.info(f"⚠️ 跳過重複記錄（已存在於歷史檔案）: {date_str}")
                 else:
-                    logger.info(f"⚠️ 跳過重複記錄: {date_str}")
+                    logger.info(f"⚠️ 跳過重複記錄（新記錄中重複）: {date_str}")
             
             if not new_records:
                 logger.info("ℹ️ 沒有新的記錄需要添加")
