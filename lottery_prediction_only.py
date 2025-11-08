@@ -73,54 +73,9 @@ def compute_weighted_frequency(df, decay_factor=0.95, recent_days=365):
         logger.error(f"❌ 時間加權計算失敗: {e}")
         return {}
 
-def compute_weighted_frequency_150(df, decay_factor=0.95, recent_periods=150):
-    """
-    計算150筆的時間加權號碼頻率 (A/B測試版本)
-    """
-    try:
-        # 只取最近150筆記錄
-        recent_df = df.tail(recent_periods).copy()
-        
-        if len(recent_df) == 0:
-            logger.warning("⚠️ 沒有足夠的記錄，使用全部資料")
-            recent_df = df.copy()
-        
-        logger.info(f"⚖️ 使用最近 {len(recent_df)} 筆記錄進行150筆加權分析")
-        
-        # 計算每筆記錄距今的天數
-        today = datetime.now()
-        recent_df['days_ago'] = (today - recent_df['日期']).dt.days
-        
-        # 計算加權頻率
-        weighted_freq = defaultdict(float)
-        total_weight = 0
-        
-        for _, row in recent_df.iterrows():
-            # 計算權重：越近期權重越高
-            weight = decay_factor ** row['days_ago']
-            total_weight += weight
-            
-            # 累加每個號碼的加權頻率
-            for col in ['號碼1', '號碼2', '號碼3', '號碼4', '號碼5']:
-                if pd.notna(row[col]):
-                    number = int(row[col])
-                    weighted_freq[number] += weight
-        
-        # 正規化頻率
-        if total_weight > 0:
-            for num in weighted_freq:
-                weighted_freq[num] = weighted_freq[num] / total_weight
-        
-        logger.info(f"✅ 完成150筆時間加權分析，衰減係數: {decay_factor}")
-        
-        return dict(weighted_freq)
-        
-    except Exception as e:
-        logger.error(f"❌ 150筆時間加權計算失敗: {e}")
-        return {}
 
 def suggest_numbers(strategy='smart', n=9, historical_stats=None, df=None, randomness_factor=0.3):
-    """產生建議號碼 (A/B測試版本，支援不同隨機因子)"""
+    """產生建議號碼 (支援不同隨機因子)"""
     numbers = list(range(1, 40))
 
     if strategy == 'smart':
@@ -158,44 +113,6 @@ def suggest_numbers(strategy='smart', n=9, historical_stats=None, df=None, rando
         # 其他策略暫不使用
         return sorted(random.sample(numbers, n))
 
-def suggest_numbers_150(strategy='smart', n=9, historical_stats=None, df=None, randomness_factor=0.3):
-    """產生建議號碼 (150筆A/B測試版本)"""
-    numbers = list(range(1, 40))
-
-    if strategy == 'smart':
-        # 智能選號：150筆時間加權智能選號
-        if df is not None:
-            try:
-                weighted_freq = compute_weighted_frequency_150(df)
-                if weighted_freq:
-                    # 根據加權頻率選號
-                    weights = [weighted_freq.get(num, 0.001) for num in numbers]
-                    
-                    # 加入隨機性避免過度依賴歷史（可調整的隨機因子）
-                    for i in range(len(weights)):
-                        weights[i] = weights[i] * (1 - randomness_factor) + random.random() * randomness_factor
-                    
-                    # 正規化權重
-                    weights = np.array(weights)
-                    weights = weights / weights.sum()
-                    
-                    # 根據權重選號
-                    selected = np.random.choice(numbers, size=n, replace=False, p=weights)
-                    result = sorted([int(x) for x in selected.tolist()])  # 確保都是 int
-                    logger.info(f"🧠 150筆時間加權智能選號 (隨機因子:{randomness_factor}): {result}")
-                    return result
-            except Exception as e:
-                logger.warning(f"⚠️ 150筆時間加權選號失敗，使用隨機選號: {e}")
-        
-        return sorted(random.sample(numbers, n))
-    elif strategy == 'balanced':
-        # 平衡策略：純隨機選號
-        result = sorted(random.sample(numbers, n))
-        logger.info(f"⚖️ 150筆平衡策略 (隨機因子:{randomness_factor}): {result}")
-        return result
-    else:
-        # 其他策略暫不使用
-        return sorted(random.sample(numbers, n))
 
 def select_top_weighted_numbers(nine_numbers, df, n=7):
     """
@@ -227,35 +144,6 @@ def select_top_weighted_numbers(nine_numbers, df, n=7):
     # 備用方案：直接取前七顆
     return sorted(nine_numbers[:n])
 
-def select_top_weighted_numbers_150(nine_numbers, df, n=7):
-    """
-    從九顆號碼中選取加權最高的七顆 (150筆版本)
-    使用150筆智能選號的加權邏輯來排序九顆號碼
-    """
-    try:
-        if df is not None:
-            # 使用150筆加權計算
-            weighted_freq = compute_weighted_frequency_150(df)
-            if weighted_freq:
-                # 計算九顆號碼的加權分數
-                number_scores = []
-                for num in nine_numbers:
-                    score = weighted_freq.get(num, 0.001)
-                    number_scores.append((num, score))
-                
-                # 按加權分數排序（高分在前）
-                number_scores.sort(key=lambda x: x[1], reverse=True)
-                
-                # 選取前七顆
-                top_seven = [num for num, _ in number_scores[:n]]
-                result = sorted(top_seven)
-                logger.info(f"🎯 從九顆中選取150筆加權最高的七顆: {result}")
-                return result
-    except Exception as e:
-        logger.warning(f"⚠️ 150筆七顆選號失敗，使用前七顆: {e}")
-    
-    # 備用方案：直接取前七顆
-    return sorted(nine_numbers[:n])
 
 def log_predictions_to_excel(predictions, log_file="prediction_log.xlsx"):
     """記錄預測結果 (僅預測版本)"""
@@ -263,7 +151,7 @@ def log_predictions_to_excel(predictions, log_file="prediction_log.xlsx"):
     date_str = current_time.strftime("%Y-%m-%d")
     time_str = current_time.strftime("%H:%M:%S")
     
-    # 準備記錄數據 - 包含A/B測試版本
+    # 準備記錄數據
     log_data = {
         '日期': date_str,
         '時間': time_str,
@@ -271,12 +159,8 @@ def log_predictions_to_excel(predictions, log_file="prediction_log.xlsx"):
         '智能選號_七顆': str(predictions.get('smart_7', [])),
         '平衡策略_九顆': str(predictions.get('balanced_9', [])),
         '平衡策略_七顆': str(predictions.get('balanced_7', [])),
-        '智能選號_九顆-150': str(predictions.get('smart_9_150', [])),
-        '智能選號_七顆-150': str(predictions.get('smart_7_150', [])),
-        '平衡策略_九顆-150': str(predictions.get('balanced_9_150', [])),
-        '平衡策略_七顆-150': str(predictions.get('balanced_7_150', [])),
         '中獎號碼數': '',  # 留空，等待驗證
-        '備註': f"最佳策略(隨機因子0.3) - A/B測試365筆vs150筆 - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}",
+        '備註': f"最佳策略(隨機因子0.3) - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}",
         '驗證結果': ''  # 留空，等待驗證
     }
     
@@ -405,40 +289,24 @@ def main():
         logger.info("🎯 使用最佳隨機因子: 0.3")
         logger.info("="*60)
         
-        # 生成九顆策略 (365筆)
+        # 生成九顆策略
         smart_9 = suggest_numbers('smart', n=9, df=df, randomness_factor=randomness_factor)
         balanced_9 = suggest_numbers('balanced', n=9, df=df, randomness_factor=randomness_factor)
         
-        # 生成七顆策略（基於九顆選號）(365筆)
+        # 生成七顆策略（基於九顆選號）
         smart_7 = select_top_weighted_numbers(smart_9, df, n=7)
         balanced_7 = select_top_weighted_numbers(balanced_9, df, n=7)
-        
-        # 生成九顆策略 (150筆A/B測試)
-        smart_9_150 = suggest_numbers_150('smart', n=9, df=df, randomness_factor=randomness_factor)
-        balanced_9_150 = suggest_numbers_150('balanced', n=9, df=df, randomness_factor=randomness_factor)
-        
-        # 生成七顆策略（基於九顆選號）(150筆A/B測試)
-        smart_7_150 = select_top_weighted_numbers_150(smart_9_150, df, n=7)
-        balanced_7_150 = select_top_weighted_numbers_150(balanced_9_150, df, n=7)
         
         # 儲存結果
         predictions['smart_9'] = smart_9
         predictions['smart_7'] = smart_7
         predictions['balanced_9'] = balanced_9
         predictions['balanced_7'] = balanced_7
-        predictions['smart_9_150'] = smart_9_150
-        predictions['smart_7_150'] = smart_7_150
-        predictions['balanced_9_150'] = balanced_9_150
-        predictions['balanced_7_150'] = balanced_7_150
         
-        logger.info(f"📋 智能選號_九顆 (365筆): {smart_9}")
-        logger.info(f"📋 智能選號_七顆 (365筆): {smart_7}")
-        logger.info(f"📋 平衡策略_九顆 (365筆): {balanced_9}")
-        logger.info(f"📋 平衡策略_七顆 (365筆): {balanced_7}")
-        logger.info(f"📋 智能選號_九顆-150: {smart_9_150}")
-        logger.info(f"📋 智能選號_七顆-150: {smart_7_150}")
-        logger.info(f"📋 平衡策略_九顆-150: {balanced_9_150}")
-        logger.info(f"📋 平衡策略_七顆-150: {balanced_7_150}")
+        logger.info(f"📋 智能選號_九顆: {smart_9}")
+        logger.info(f"📋 智能選號_七顆: {smart_7}")
+        logger.info(f"📋 平衡策略_九顆: {balanced_9}")
+        logger.info(f"📋 平衡策略_七顆: {balanced_7}")
         
         # 記錄預測結果
         success = log_predictions_to_excel(predictions, "prediction_log.xlsx")
