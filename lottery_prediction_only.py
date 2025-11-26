@@ -74,52 +74,178 @@ def compute_weighted_frequency(df, decay_factor=0.95, recent_days=365):
         return {}
 
 
-def apply_sum_filter(numbers, min_sum=90, max_sum=120):
-    """
-    和值過濾：檢查前5個號碼的和值是否在合理範圍內
-    Args:
-        numbers: 號碼列表（已排序）
-        min_sum: 最小和值（預設90）
-        max_sum: 最大和值（預設120）
-    Returns:
-        bool: True表示通過過濾
-    """
+def check_odd_even_ratio(numbers):
+    """檢查奇偶比例是否為 2:3 或 3:2"""
+    first_five = sorted(numbers)[:5]
+    odd_count = sum(1 for n in first_five if n % 2 == 1)
+    return odd_count in [2, 3]
+
+
+def check_sum_range(numbers, min_sum=83, max_sum=116):
+    """檢查和值是否在範圍內（歷史覆蓋率51.39%）"""
     first_five = sorted(numbers)[:5]
     total = sum(first_five)
     return min_sum <= total <= max_sum
 
 
-def suggest_numbers(strategy='smart', n=9, historical_stats=None, df=None, randomness_factor=0.3, 
-                   use_sum_filter=True, min_sum=90, max_sum=120, max_attempts=100):
+def has_consecutive(numbers):
+    """檢查是否有連號"""
+    sorted_nums = sorted(numbers)
+    for i in range(len(sorted_nums) - 1):
+        if sorted_nums[i+1] - sorted_nums[i] == 1:
+            return True
+    return False
+
+
+def count_hot_numbers(numbers, hot_list=[1, 27, 11, 17, 23]):
+    """計算包含多少個熱門號"""
+    return sum(1 for n in numbers if n in hot_list)
+
+
+def count_special_tails(numbers, special_tails=[1, 4, 7]):
+    """計算有多少個號碼的尾數是 1, 4, 7"""
+    return sum(1 for n in numbers if (n % 10) in special_tails)
+
+
+def apply_high_prob_filters(numbers, target_weekday=None, require_consecutive=False):
     """
-    產生建議號碼 (支援和值過濾)
+    應用高機率特徵過濾
+    
+    Args:
+        numbers: 號碼列表
+        target_weekday: 目標星期（0-6）
+        require_consecutive: 是否要求有連號
+    
+    Returns:
+        (通過過濾, 分數)
+    """
+    # 星期強勢號碼（根據歷史統計）
+    weekday_strong_numbers = {
+        0: [6, 24, 17, 16, 1],      # 週一
+        1: [38, 25, 23, 11, 19],    # 週二
+        2: [38, 6, 1, 34, 23],      # 週三
+        3: [27, 37, 35, 14, 17],    # 週四
+        4: [8, 39, 17, 31, 9],      # 週五
+        5: [8, 35, 24, 4, 20],      # 週六
+    }
+    
+    score = 0
+    reasons = []
+    
+    # 1. 檢查和值 (必須) - 83-116範圍覆蓋51.39%歷史
+    if not check_sum_range(numbers, 83, 116):
+        return False, 0
+    score += 30
+    reasons.append("和值✓")
+    
+    # 2. 檢查奇偶比例 (必須) - 2:3或3:2覆蓋63.59%歷史
+    if not check_odd_even_ratio(numbers):
+        return False, 0
+    score += 30
+    reasons.append("奇偶✓")
+    
+    # 3. 檢查熱門號 (1-2個，加分項)
+    hot_count = count_hot_numbers(numbers)
+    if hot_count >= 1:
+        score += min(hot_count * 10, 20)
+        reasons.append(f"熱號x{hot_count}✓")
+    
+    # 4. 檢查星期強勢號 (加分項)
+    if target_weekday is not None:
+        strong_nums = weekday_strong_numbers.get(target_weekday, [])
+        strong_count = sum(1 for n in numbers if n in strong_nums)
+        if strong_count >= 1:
+            score += min(strong_count * 5, 15)
+            reasons.append(f"星期x{strong_count}✓")
+    
+    # 5. 檢查連號 (條件性，歷史42.79%)
+    has_consec = has_consecutive(numbers)
+    if require_consecutive and not has_consec:
+        score -= 10
+    elif has_consec:
+        score += 10
+        reasons.append("連號✓")
+    
+    # 6. 檢查特殊尾數 (加分項，覆蓋31.75%歷史)
+    tail_count = count_special_tails(numbers)
+    if tail_count >= 2:
+        score += min(tail_count * 3, 10)
+        reasons.append(f"尾數x{tail_count}✓")
+    
+    return True, score
+
+
+def suggest_numbers(strategy='smart', n=9, historical_stats=None, df=None, randomness_factor=0.3, 
+                   use_high_prob=True, target_weekday=None, max_attempts=500):
+    """
+    產生建議號碼 (支援高機率特徵過濾)
     Args:
         strategy: 策略名稱
         n: 選號數量
         df: 歷史資料
         randomness_factor: 隨機因子
-        use_sum_filter: 是否使用和值過濾
-        min_sum: 最小和值
-        max_sum: 最大和值
+        use_high_prob: 是否使用高機率特徵過濾
+        target_weekday: 目標星期（0-6，0=週一）
         max_attempts: 最大嘗試次數
     """
     numbers = list(range(1, 40))
+    
+    # 熱門號碼
+    hot_numbers = [1, 27, 11, 17, 23]
+    
+    # 特殊尾數
+    special_tails = [1, 4, 7]
+    
+    # 星期強勢號碼
+    weekday_strong_numbers = {
+        0: [6, 24, 17, 16, 1],
+        1: [38, 25, 23, 11, 19],
+        2: [38, 6, 1, 34, 23],
+        3: [27, 37, 35, 14, 17],
+        4: [8, 39, 17, 31, 9],
+        5: [8, 35, 24, 4, 20],
+    }
 
     if strategy == 'smart':
-        # 智能選號：時間加權智能選號 + 和值過濾
+        # 智能選號：時間加權 + 高機率特徵過濾
         if df is not None:
             try:
                 weighted_freq = compute_weighted_frequency(df)
                 if weighted_freq:
-                    # 嘗試多次直到找到符合和值過濾的組合
+                    # 決定是否要求連號（40%機率）
+                    require_consecutive = random.random() < 0.4
+                    
+                    best_numbers = None
+                    best_score = -1
+                    
+                    # 嘗試多次直到找到符合所有過濾的組合
                     for attempt in range(max_attempts):
                         # 根據加權頻率選號
                         weights = [weighted_freq.get(num, 0.001) for num in numbers]
                         
-                        # 加入隨機性避免過度依賴歷史（可調整的隨機因子）
+                        # 加入隨機性
                         adjusted_weights = []
                         for w in weights:
                             adjusted_weights.append(w * (1 - randomness_factor) + random.random() * randomness_factor)
+                        
+                        # 如果啟用高機率特徵，對特定號碼加權
+                        if use_high_prob:
+                            # 對熱門號加權
+                            for i, num in enumerate(numbers):
+                                if num in hot_numbers:
+                                    adjusted_weights[i] *= 1.3
+                            
+                            # 對星期強勢號加權
+                            if target_weekday is not None:
+                                strong_nums = weekday_strong_numbers.get(target_weekday, [])
+                                for i, num in enumerate(numbers):
+                                    if num in strong_nums:
+                                        adjusted_weights[i] *= 1.2
+                            
+                            # 對特殊尾數加權
+                            for i, num in enumerate(numbers):
+                                if (num % 10) in special_tails:
+                                    adjusted_weights[i] *= 1.1
                         
                         # 正規化權重
                         adjusted_weights = np.array(adjusted_weights)
@@ -127,25 +253,40 @@ def suggest_numbers(strategy='smart', n=9, historical_stats=None, df=None, rando
                         
                         # 根據權重選號
                         selected = np.random.choice(numbers, size=n, replace=False, p=adjusted_weights)
-                        result = sorted([int(x) for x in selected.tolist()])  # 確保都是 int
+                        result = sorted([int(x) for x in selected.tolist()])
                         
-                        # 檢查是否通過和值過濾
-                        if not use_sum_filter or apply_sum_filter(result, min_sum, max_sum):
-                            sum_info = f", 和值:{sum(result[:5])}" if use_sum_filter else ""
-                            logger.info(f"🧠 時間加權智能選號 (隨機因子:{randomness_factor}{sum_info}): {result}")
+                        # 檢查是否通過高機率特徵過濾
+                        if use_high_prob:
+                            passed, score = apply_high_prob_filters(result, target_weekday, require_consecutive)
+                            
+                            if passed and score > best_score:
+                                best_numbers = result
+                                best_score = score
+                                
+                                # 如果分數夠高，提前返回
+                                if score >= 70:
+                                    break
+                        else:
+                            # 不使用過濾，直接返回
+                            logger.info(f"🧠 時間加權選號 (和值:{sum(result[:5])}): {result}")
                             return result
                     
-                    # 如果超過最大嘗試次數，返回最後一次結果（即使不符合過濾）
-                    logger.warning(f"⚠️ 超過 {max_attempts} 次嘗試，返回未過濾結果")
+                    # 如果找到符合規則的組合，返回最佳的
+                    if best_numbers is not None:
+                        logger.info(f"🧠 高機率特徵選號 (分數:{best_score}, 和值:{sum(best_numbers[:5])}): {best_numbers}")
+                        return best_numbers
+                    
+                    # 如果超過最大嘗試次數，返回最後一次結果
+                    logger.warning(f"⚠️ 超過 {max_attempts} 次嘗試，使用備用選號")
                     return result
             except Exception as e:
-                logger.warning(f"⚠️ 時間加權選號失敗，使用隨機選號: {e}")
+                logger.warning(f"⚠️ 智能選號失敗: {e}")
         
         return sorted(random.sample(numbers, n))
     elif strategy == 'balanced':
         # 平衡策略：純隨機選號
         result = sorted(random.sample(numbers, n))
-        logger.info(f"⚖️ 平衡策略 (隨機因子:{randomness_factor}): {result}")
+        logger.info(f"⚖️ 平衡策略: {result}")
         return result
     else:
         # 其他策略暫不使用
@@ -198,7 +339,7 @@ def log_predictions_to_excel(predictions, log_file="prediction_log.xlsx"):
         '平衡策略_九顆': str(predictions.get('balanced_9', [])),
         '平衡策略_七顆': str(predictions.get('balanced_7', [])),
         '中獎號碼數': '',  # 留空，等待驗證
-        '備註': f"和值過濾策略(90-120) - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}",
+        '備註': f"高機率特徵策略(6大規則) - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}",
         '驗證結果': ''  # 留空，等待驗證
     }
     
@@ -320,21 +461,27 @@ def main():
         df = load_lottery_excel(excel_file)
         logger.info(f"📊 成功載入 {len(df)} 筆歷史資料")
         
-        # 使用和值過濾策略
+        # 使用高機率特徵策略
         randomness_factor = 0.3
-        use_sum_filter = True
-        min_sum = 90
-        max_sum = 120
+        use_high_prob = True
+        
+        # 取得今天星期幾
+        today_weekday = datetime.now().weekday()
+        
         predictions = {}
         
-        logger.info("🎯 使用和值過濾策略")
-        logger.info(f"   隨機因子: {randomness_factor}")
-        logger.info(f"   和值範圍: {min_sum} - {max_sum}")
+        logger.info("🎯 使用高機率特徵策略（6大規則）")
+        logger.info(f"   1. 熱門號: 1, 27, 11, 17, 23")
+        logger.info(f"   2. 和值範圍: 83-116")
+        logger.info(f"   3. 奇偶比例: 2:3 或 3:2")
+        logger.info(f"   4. 星期效應: 已啟用")
+        logger.info(f"   5. 連號機率: 40%")
+        logger.info(f"   6. 特殊尾數: 1, 4, 7")
         logger.info("="*60)
         
-        # 生成九顆策略（帶和值過濾）
+        # 生成九顆策略（帶高機率特徵過濾）
         smart_9 = suggest_numbers('smart', n=9, df=df, randomness_factor=randomness_factor,
-                                 use_sum_filter=use_sum_filter, min_sum=min_sum, max_sum=max_sum)
+                                 use_high_prob=use_high_prob, target_weekday=today_weekday)
         balanced_9 = suggest_numbers('balanced', n=9, df=df, randomness_factor=randomness_factor)
         
         # 生成七顆策略（基於九顆選號）
