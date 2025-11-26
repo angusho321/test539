@@ -74,38 +74,76 @@ def compute_weighted_frequency(df, decay_factor=0.95, recent_days=365):
         return {}
 
 
-def suggest_numbers(strategy='smart', n=9, historical_stats=None, df=None, randomness_factor=0.3):
-    """產生建議號碼 (支援不同隨機因子)"""
+def apply_sum_filter(numbers, min_sum=90, max_sum=120):
+    """
+    和值過濾：檢查前5個號碼的和值是否在合理範圍內
+    Args:
+        numbers: 號碼列表（已排序）
+        min_sum: 最小和值（預設90）
+        max_sum: 最大和值（預設120）
+    Returns:
+        bool: True表示通過過濾
+    """
+    first_five = sorted(numbers)[:5]
+    total = sum(first_five)
+    return min_sum <= total <= max_sum
+
+
+def suggest_numbers(strategy='smart', n=9, historical_stats=None, df=None, randomness_factor=0.3, 
+                   use_sum_filter=True, min_sum=90, max_sum=120, max_attempts=100):
+    """
+    產生建議號碼 (支援和值過濾)
+    Args:
+        strategy: 策略名稱
+        n: 選號數量
+        df: 歷史資料
+        randomness_factor: 隨機因子
+        use_sum_filter: 是否使用和值過濾
+        min_sum: 最小和值
+        max_sum: 最大和值
+        max_attempts: 最大嘗試次數
+    """
     numbers = list(range(1, 40))
 
     if strategy == 'smart':
-        # 智能選號：時間加權智能選號
+        # 智能選號：時間加權智能選號 + 和值過濾
         if df is not None:
             try:
                 weighted_freq = compute_weighted_frequency(df)
                 if weighted_freq:
-                    # 根據加權頻率選號
-                    weights = [weighted_freq.get(num, 0.001) for num in numbers]
+                    # 嘗試多次直到找到符合和值過濾的組合
+                    for attempt in range(max_attempts):
+                        # 根據加權頻率選號
+                        weights = [weighted_freq.get(num, 0.001) for num in numbers]
+                        
+                        # 加入隨機性避免過度依賴歷史（可調整的隨機因子）
+                        adjusted_weights = []
+                        for w in weights:
+                            adjusted_weights.append(w * (1 - randomness_factor) + random.random() * randomness_factor)
+                        
+                        # 正規化權重
+                        adjusted_weights = np.array(adjusted_weights)
+                        adjusted_weights = adjusted_weights / adjusted_weights.sum()
+                        
+                        # 根據權重選號
+                        selected = np.random.choice(numbers, size=n, replace=False, p=adjusted_weights)
+                        result = sorted([int(x) for x in selected.tolist()])  # 確保都是 int
+                        
+                        # 檢查是否通過和值過濾
+                        if not use_sum_filter or apply_sum_filter(result, min_sum, max_sum):
+                            sum_info = f", 和值:{sum(result[:5])}" if use_sum_filter else ""
+                            logger.info(f"🧠 時間加權智能選號 (隨機因子:{randomness_factor}{sum_info}): {result}")
+                            return result
                     
-                    # 加入隨機性避免過度依賴歷史（可調整的隨機因子）
-                    for i in range(len(weights)):
-                        weights[i] = weights[i] * (1 - randomness_factor) + random.random() * randomness_factor
-                    
-                    # 正規化權重
-                    weights = np.array(weights)
-                    weights = weights / weights.sum()
-                    
-                    # 根據權重選號
-                    selected = np.random.choice(numbers, size=n, replace=False, p=weights)
-                    result = sorted([int(x) for x in selected.tolist()])  # 確保都是 int
-                    logger.info(f"🧠 時間加權智能選號 (隨機因子:{randomness_factor}): {result}")
+                    # 如果超過最大嘗試次數，返回最後一次結果（即使不符合過濾）
+                    logger.warning(f"⚠️ 超過 {max_attempts} 次嘗試，返回未過濾結果")
                     return result
             except Exception as e:
                 logger.warning(f"⚠️ 時間加權選號失敗，使用隨機選號: {e}")
         
         return sorted(random.sample(numbers, n))
     elif strategy == 'balanced':
-        # 平衡策略：純隨機選號（受益於智能選號的隨機狀態污染）
+        # 平衡策略：純隨機選號
         result = sorted(random.sample(numbers, n))
         logger.info(f"⚖️ 平衡策略 (隨機因子:{randomness_factor}): {result}")
         return result
@@ -160,7 +198,7 @@ def log_predictions_to_excel(predictions, log_file="prediction_log.xlsx"):
         '平衡策略_九顆': str(predictions.get('balanced_9', [])),
         '平衡策略_七顆': str(predictions.get('balanced_7', [])),
         '中獎號碼數': '',  # 留空，等待驗證
-        '備註': f"最佳策略(隨機因子0.3) - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}",
+        '備註': f"和值過濾策略(90-120) - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}",
         '驗證結果': ''  # 留空，等待驗證
     }
     
@@ -282,15 +320,21 @@ def main():
         df = load_lottery_excel(excel_file)
         logger.info(f"📊 成功載入 {len(df)} 筆歷史資料")
         
-        # 使用最佳隨機因子 0.3
+        # 使用和值過濾策略
         randomness_factor = 0.3
+        use_sum_filter = True
+        min_sum = 90
+        max_sum = 120
         predictions = {}
         
-        logger.info("🎯 使用最佳隨機因子: 0.3")
+        logger.info("🎯 使用和值過濾策略")
+        logger.info(f"   隨機因子: {randomness_factor}")
+        logger.info(f"   和值範圍: {min_sum} - {max_sum}")
         logger.info("="*60)
         
-        # 生成九顆策略
-        smart_9 = suggest_numbers('smart', n=9, df=df, randomness_factor=randomness_factor)
+        # 生成九顆策略（帶和值過濾）
+        smart_9 = suggest_numbers('smart', n=9, df=df, randomness_factor=randomness_factor,
+                                 use_sum_filter=use_sum_filter, min_sum=min_sum, max_sum=max_sum)
         balanced_9 = suggest_numbers('balanced', n=9, df=df, randomness_factor=randomness_factor)
         
         # 生成七顆策略（基於九顆選號）
