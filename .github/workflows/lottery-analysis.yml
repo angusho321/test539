@@ -76,6 +76,13 @@ jobs:
     # 步驟 3: 預測今日的號碼
     - name: 📊 Generate today's predictions
       run: python lottery_prediction_only.py
+    
+    # 步驟 4: 執行進階策略分析 (僅分析 539)
+    - name: 🧠 Run Advanced Strategy Analysis (539 only)
+      env:
+        GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+      run: python auto_analyze_strategies.py --type 539
       
     - name: ⬆️ Upload all results to Google Drive
       env:
@@ -90,5 +97,6 @@ jobs:
         path: |
           lottery_hist.xlsx
           prediction_log.xlsx
+          best_strategies_539.csv
           *.log
         retention-days: 30

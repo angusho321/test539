@@ -5,6 +5,8 @@ from collections import defaultdict
 import datetime
 import os
 import json
+import sys
+import argparse
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -185,18 +187,33 @@ def select_best_strategies(df, threshold=0.0):
 # Google Drive 上傳
 # ==========================================
 def upload_to_drive(local_file, folder_id, creds_json):
-    if not os.path.exists(local_file) or not folder_id or not creds_json:
-        return
+    """上傳文件到 Google Drive，如果不存在則創建"""
+    if not os.path.exists(local_file):
+        print(f"❌ 本地文件不存在: {local_file}")
+        return False
+    
+    if not folder_id:
+        print(f"⚠️ 未設置 GOOGLE_DRIVE_FOLDER_ID")
+        return False
+    
+    if not creds_json:
+        print(f"⚠️ 未設置 GOOGLE_CREDENTIALS")
+        return False
 
     try:
-        creds_dict = json.loads(creds_json)
+        # 解析認證資訊
+        if isinstance(creds_json, str):
+            creds_dict = json.loads(creds_json)
+        else:
+            creds_dict = creds_json
+        
         creds = service_account.Credentials.from_service_account_info(
             creds_dict, scopes=['https://www.googleapis.com/auth/drive']
         )
         service = build('drive', 'v3', credentials=creds)
         file_name = os.path.basename(local_file)
 
-        # 搜尋是否存在
+        # 搜尋雲端是否已存在該文件
         query = f"name = '{file_name}' and '{folder_id}' in parents and trashed = false"
         results = service.files().list(q=query, fields="files(id, name)").execute()
         files = results.get('files', [])
@@ -204,27 +221,114 @@ def upload_to_drive(local_file, folder_id, creds_json):
         media = MediaFileUpload(local_file, mimetype='text/csv')
 
         if not files:
-            # 新增
-            service.files().create(
-                body={'name': file_name, 'parents': [folder_id]},
-                media_body=media
+            # 雲端不存在，創建新文件
+            file_metadata = {
+                'name': file_name,
+                'parents': [folder_id]
+            }
+            created_file = service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id,name,webViewLink'
             ).execute()
-            print(f"✅ [Drive] 新增: {file_name}")
+            print(f"✅ [Drive] 新增文件: {file_name}")
+            print(f"   📁 文件 ID: {created_file.get('id')}")
+            print(f"   🔗 檢視連結: {created_file.get('webViewLink', 'N/A')}")
         else:
-            # 更新
+            # 雲端已存在，更新文件
+            file_id = files[0]['id']
             service.files().update(
-                fileId=files[0]['id'],
+                fileId=file_id,
                 media_body=media
             ).execute()
-            print(f"✅ [Drive] 更新: {file_name}")
+            print(f"✅ [Drive] 更新文件: {file_name} (ID: {file_id})")
+        
+        return True
 
+    except json.JSONDecodeError as e:
+        print(f"❌ [Drive] 認證資訊格式錯誤: {e}")
+        return False
     except Exception as e:
-        print(f"❌ Drive Error: {e}")
+        print(f"❌ [Drive] 上傳失敗: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 # ==========================================
 # 主流程
 # ==========================================
+def process_single(name, input_file, output_file, is_fantasy, folder_id, creds):
+    """處理單一彩球的分析"""
+    print(f"\n⚡ 分析 {name} (轉換時區: {is_fantasy})...")
+    df = load_data(input_file, is_fantasy)
+    if df is None:
+        print(f"❌ 找不到 {input_file}，跳過")
+        return False
+        
+    # 日期篩選
+    max_date = df['Analysis_Date'].max()
+    cutoff_8wk = max_date - pd.Timedelta(weeks=8)
+    cutoff_1yr = max_date - pd.Timedelta(weeks=52)
+    
+    data_by_week = get_data_by_week(df)
+    all_weeks = sorted(data_by_week.keys())
+    
+    weeks_8wk = [w for w in all_weeks if w in get_data_by_week(df[df['Analysis_Date'] >= cutoff_8wk])][1:] # 略過資料不全的當週
+    weeks_1yr = [w for w in all_weeks if w in get_data_by_week(df[df['Analysis_Date'] >= cutoff_1yr])]
+    
+    # 1. 短期 (8週)
+    print("   -> 計算短期勝率...")
+    df_short = calculate_stats(data_by_week, weeks_8wk, mode="win_rate")
+    
+    # 2. 長期 (1年)
+    print("   -> 計算長期勝率...")
+    df_long = calculate_stats(data_by_week, weeks_1yr, mode="win_rate")
+    
+    # 3. 連莊
+    print("   -> 計算連莊霸主...")
+    df_streak = calculate_stats(data_by_week, all_weeks, mode="streak")
+    
+    # 彙整
+    report = []
+    
+    # 短期 (門檻 85%)
+    s1, s2 = select_best_strategies(df_short, threshold=0.85)
+    report.append({"策略維度": "短期爆發 (近8週)", "第一組": s1, "第二組": s2})
+    
+    # 長期 (門檻 90%，低於顯示無數據)
+    l1, l2 = select_best_strategies(df_long, threshold=0.90)
+    report.append({"策略維度": "長期穩健 (近1年)", "第一組": l1, "第二組": l2})
+    
+    # 連莊 (至少連5週)
+    st1, st2 = select_best_strategies(df_streak, threshold=5)
+    report.append({"策略維度": "連莊霸主 (連勝中)", "第一組": st1, "第二組": st2})
+    
+    # 輸出 CSV (確保一定會創建文件)
+    res_df = pd.DataFrame(report)
+    res_df.to_csv(output_file, index=False, encoding='utf-8-sig')
+    print(f"📄 已建立: {output_file}")
+    
+    # 驗證文件確實存在
+    if not os.path.exists(output_file):
+        print(f"❌ 警告: {output_file} 創建失敗")
+        return False
+    
+    # 上傳到 Google Drive
+    if folder_id and creds:
+        try:
+            upload_to_drive(output_file, folder_id, creds)
+            print(f"✅ {output_file} 已上傳到 Google Drive")
+        except Exception as e:
+            print(f"⚠️ 上傳 {output_file} 到 Google Drive 時發生錯誤: {e}")
+            print(f"   本地文件已創建: {output_file}")
+    else:
+        print(f"⚠️ 未設置 Google Drive 環境變數，跳過上傳")
+        print(f"   需要設置: GOOGLE_DRIVE_FOLDER_ID 和 GOOGLE_CREDENTIALS")
+    
+    return True
+
 def process_all():
+    """處理所有彩球的分析（預設行為）"""
     folder_id = os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
     creds = os.environ.get('GOOGLE_CREDENTIALS')
 
@@ -234,58 +338,24 @@ def process_all():
     ]
 
     for name, input_file, output_file, is_fantasy in tasks:
-        print(f"\n⚡ 分析 {name} (轉換時區: {is_fantasy})...")
-        df = load_data(input_file, is_fantasy)
-        if df is None:
-            print(f"❌ 找不到 {input_file}，跳過")
-            continue
-            
-        # 日期篩選
-        max_date = df['Analysis_Date'].max()
-        cutoff_8wk = max_date - pd.Timedelta(weeks=8)
-        cutoff_1yr = max_date - pd.Timedelta(weeks=52)
-        
-        data_by_week = get_data_by_week(df)
-        all_weeks = sorted(data_by_week.keys())
-        
-        weeks_8wk = [w for w in all_weeks if w in get_data_by_week(df[df['Analysis_Date'] >= cutoff_8wk])][1:] # 略過資料不全的當週
-        weeks_1yr = [w for w in all_weeks if w in get_data_by_week(df[df['Analysis_Date'] >= cutoff_1yr])]
-        
-        # 1. 短期 (8週)
-        print("   -> 計算短期勝率...")
-        df_short = calculate_stats(data_by_week, weeks_8wk, mode="win_rate")
-        
-        # 2. 長期 (1年)
-        print("   -> 計算長期勝率...")
-        df_long = calculate_stats(data_by_week, weeks_1yr, mode="win_rate")
-        
-        # 3. 連莊
-        print("   -> 計算連莊霸主...")
-        df_streak = calculate_stats(data_by_week, all_weeks, mode="streak")
-        
-        # 彙整
-        report = []
-        
-        # 短期 (門檻 85%)
-        s1, s2 = select_best_strategies(df_short, threshold=0.85)
-        report.append({"策略維度": "短期爆發 (近8週)", "第一組": s1, "第二組": s2})
-        
-        # 長期 (門檻 90%，低於顯示無數據)
-        l1, l2 = select_best_strategies(df_long, threshold=0.90)
-        report.append({"策略維度": "長期穩健 (近1年)", "第一組": l1, "第二組": l2})
-        
-        # 連莊 (至少連5週)
-        st1, st2 = select_best_strategies(df_streak, threshold=5)
-        report.append({"策略維度": "連莊霸主 (連勝中)", "第一組": st1, "第二組": st2})
-        
-        # 輸出 CSV
-        res_df = pd.DataFrame(report)
-        res_df.to_csv(output_file, index=False, encoding='utf-8-sig')
-        print(f"📄 已建立: {output_file}")
-        
-        # 上傳
-        if folder_id:
-            upload_to_drive(output_file, folder_id, creds)
+        process_single(name, input_file, output_file, is_fantasy, folder_id, creds)
 
 if __name__ == "__main__":
-    process_all()
+    parser = argparse.ArgumentParser(description='分析彩球策略')
+    parser.add_argument('--type', type=str, choices=['539', 'fantasy5', 'all'], 
+                       default='all', help='指定要分析的彩球類型: 539, fantasy5, 或 all (預設)')
+    
+    args = parser.parse_args()
+    
+    folder_id = os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
+    creds = os.environ.get('GOOGLE_CREDENTIALS')
+    
+    if args.type == '539':
+        print("🎯 僅分析 539...")
+        process_single("539", FILE_539, OUTPUT_539, False, folder_id, creds)
+    elif args.type == 'fantasy5':
+        print("🎯 僅分析天天樂...")
+        process_single("天天樂", FILE_FANTASY, OUTPUT_FANTASY, True, folder_id, creds)
+    else:
+        print("🎯 分析所有彩球...")
+        process_all()

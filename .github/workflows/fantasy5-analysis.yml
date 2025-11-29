@@ -37,19 +37,18 @@ jobs:
       run: |
         echo "$GOOGLE_CREDENTIALS" > credentials.json
         
-    # --- 下載區：同時下載天天樂和 539 的歷史紀錄 ---
+    # ========================================================
+    # 下載歷史資料區
+    # ========================================================
     - name: ⬇️ Download existing Fantasy 5 history
       env:
         FANTASY5_HIST_FILE_ID: ${{ secrets.FANTASY5_HIST_FILE_ID }}
       run: python scripts/download_fantasy5_from_drive.py
-
-    - name: ⬇️ Download 539 history (For Combined Analysis)
-      env:
-        LOTTERY_HIST_FILE_ID: ${{ secrets.LOTTERY_HIST_FILE_ID }}
-      run: python scripts/download_from_drive.py
         
-    # --- 爬蟲區：更新天天樂資料 ---
-    - name: 🎯 Crawl latest Fantasy 5 results
+    # ========================================================
+    
+    # --- 天天樂爬蟲更新 ---
+    - name: 🎯 Crawl latest Fantasy 5 results (記錄昨天開獎)
       run: python fantasy5_crawler.py
       
     - name: ⬆️ Update Fantasy 5 history to Google Drive
@@ -57,7 +56,7 @@ jobs:
         FANTASY5_HIST_FILE_ID: ${{ secrets.FANTASY5_HIST_FILE_ID }}
       run: python scripts/upload_fantasy5_hist.py
       
-    # --- 預測區：執行既有的 7/9 碼預測 ---
+    # --- 預測與驗證區 ---
     - name: ⬇️ Download Fantasy 5 prediction log
       env:
         FANTASY5_PREDICTION_LOG_FILE_ID: ${{ secrets.FANTASY5_PREDICTION_LOG_FILE_ID }}
@@ -70,16 +69,16 @@ jobs:
       run: python fantasy5_prediction_only.py
 
     # ========================================================
-    # ★ 新增步驟：執行「連莊/短期/長期」總分析 (539 + 天天樂)
+    # ★ 執行進階策略分析 (僅分析天天樂)
     # ========================================================
-    - name: 🧠 Run Auto Strategy Analysis (Combined)
+    - name: 🧠 Run Advanced Strategy Analysis (Fantasy5 only)
       env:
         GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
         GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-      run: python auto_analyze_strategies.py
+      run: python auto_analyze_strategies.py --type fantasy5
       
     # --- 上傳與歸檔 ---
-    - name: ⬆️ Upload all Fantasy 5 results to Google Drive
+    - name: ⬆️ Upload Fantasy 5 Prediction Log
       env:
         FANTASY5_PREDICTION_LOG_FILE_ID: ${{ secrets.FANTASY5_PREDICTION_LOG_FILE_ID }}
         GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
@@ -91,9 +90,7 @@ jobs:
         name: daily-fantasy5-process-${{ github.run_number }}
         path: |
           fantasy5_hist.xlsx
-          lottery_hist.xlsx
           fantasy5_prediction_log.xlsx
-          best_strategies_539.csv
           best_strategies_fantasy5.csv
           *.log
         retention-days: 30
