@@ -80,10 +80,16 @@ jobs:
     # 步驟 4: 執行進階策略分析 (僅分析 539)
     - name: 🧠 Run Advanced Strategy Analysis (539 only)
       env:
+        BEST_STRATEGIES_539_FILE_ID: ${{ secrets.BEST_STRATEGIES_539_FILE_ID }}
         GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
         GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
       run: |
         # 驗證環境變數是否設置（不顯示敏感資訊）
+        if [ -z "$BEST_STRATEGIES_539_FILE_ID" ]; then
+          echo "⚠️ 提示: BEST_STRATEGIES_539_FILE_ID 未設置（將使用資料夾 ID）"
+        else
+          echo "✅ BEST_STRATEGIES_539_FILE_ID 已設置"
+        fi
         if [ -z "$GOOGLE_DRIVE_FOLDER_ID" ]; then
           echo "⚠️ 警告: GOOGLE_DRIVE_FOLDER_ID 未設置"
         else

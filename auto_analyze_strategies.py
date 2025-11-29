@@ -205,14 +205,13 @@ def select_best_strategies(df, threshold=0.0):
 # ==========================================
 # Google Drive 上傳
 # ==========================================
-def upload_to_drive(local_file, folder_id, creds_json):
-    """上傳文件到 Google Drive，如果不存在則創建"""
+def upload_to_drive(local_file, file_id=None, folder_id=None, creds_json=None):
+    """
+    上傳文件到 Google Drive
+    優先使用文件 ID 更新現有文件，如果沒有則使用資料夾 ID 創建新文件
+    """
     if not os.path.exists(local_file):
         print(f"❌ 本地文件不存在: {local_file}")
-        return False
-    
-    if not folder_id:
-        print(f"⚠️ 未設置 GOOGLE_DRIVE_FOLDER_ID")
         return False
     
     if not creds_json:
@@ -235,59 +234,85 @@ def upload_to_drive(local_file, folder_id, creds_json):
         # 獲取服務帳號郵件（用於調試）
         service_account_email = creds_dict.get('client_email', 'unknown')
         print(f"🔍 使用服務帳號: {service_account_email}")
-        print(f"🔍 目標資料夾 ID: {folder_id}")
-
-        # 先驗證資料夾是否存在且有權限
-        try:
-            folder_info = service.files().get(
-                fileId=folder_id,
-                fields='id,name,mimeType,permissions'
-            ).execute()
-            print(f"✅ 資料夾驗證成功: {folder_info.get('name', '未知')}")
-            print(f"   📁 資料夾 ID: {folder_info.get('id')}")
-            print(f"   📄 類型: {folder_info.get('mimeType', 'unknown')}")
-        except Exception as folder_error:
-            error_msg = str(folder_error)
-            if '404' in error_msg or 'notFound' in error_msg:
-                print(f"❌ [Drive] 資料夾不存在或無權限訪問")
-                print(f"   📁 資料夾 ID: {folder_id}")
-                print(f"   💡 解決方案:")
-                print(f"      1. 確認資料夾 ID 是否正確")
-                print(f"      2. 在 Google Drive 中分享資料夾給服務帳號: {service_account_email}")
-                print(f"      3. 確保服務帳號有「編輯者」權限")
-            else:
-                print(f"❌ [Drive] 驗證資料夾時發生錯誤: {folder_error}")
-            return False
-
-        # 搜尋雲端是否已存在該文件
-        query = f"name = '{file_name}' and '{folder_id}' in parents and trashed = false"
-        results = service.files().list(q=query, fields="files(id, name)").execute()
-        files = results.get('files', [])
 
         media = MediaFileUpload(local_file, mimetype='text/csv')
 
-        if not files:
-            # 雲端不存在，創建新文件
-            file_metadata = {
-                'name': file_name,
-                'parents': [folder_id]
-            }
-            created_file = service.files().create(
-                body=file_metadata,
-                media_body=media,
-                fields='id,name,webViewLink'
-            ).execute()
-            print(f"✅ [Drive] 新增文件: {file_name}")
-            print(f"   📁 文件 ID: {created_file.get('id')}")
-            print(f"   🔗 檢視連結: {created_file.get('webViewLink', 'N/A')}")
+        # 優先嘗試使用文件 ID 更新現有文件
+        if file_id:
+            try:
+                print(f"🔍 嘗試更新現有文件 ID: {file_id}")
+                # 驗證文件是否存在且有權限
+                file_info = service.files().get(
+                    fileId=file_id,
+                    fields='id,name,parents,mimeType'
+                ).execute()
+                print(f"✅ 文件驗證成功: {file_info.get('name', '未知')}")
+                print(f"   📁 文件 ID: {file_info.get('id')}")
+                print(f"   📂 父資料夾: {file_info.get('parents', ['根目錄'])}")
+                
+                # 更新文件
+                updated_file = service.files().update(
+                    fileId=file_id,
+                    media_body=media,
+                    fields='id,name,webViewLink'
+                ).execute()
+                print(f"✅ [Drive] 更新文件: {updated_file.get('name')} (ID: {file_id})")
+                print(f"   🔗 檢視連結: {updated_file.get('webViewLink', 'N/A')}")
+                return True
+            except Exception as update_error:
+                error_msg = str(update_error)
+                if '404' in error_msg or 'notFound' in error_msg:
+                    print(f"⚠️ 文件 ID 不存在或無權限，嘗試創建新文件...")
+                else:
+                    print(f"⚠️ 更新文件失敗: {update_error}")
+                    print(f"   嘗試其他解決方案...")
+
+        # 如果沒有文件 ID 或更新失敗，嘗試使用資料夾 ID 創建新文件
+        if folder_id:
+            try:
+                print(f"🔍 嘗試在資料夾中創建新文件...")
+                print(f"   📁 資料夾 ID: {folder_id}")
+                
+                # 驗證資料夾是否存在
+                folder_info = service.files().get(
+                    fileId=folder_id,
+                    fields='id,name,mimeType'
+                ).execute()
+                print(f"✅ 資料夾驗證成功: {folder_info.get('name', '未知')}")
+                
+                # 創建新文件
+                file_metadata = {
+                    'name': file_name,
+                    'parents': [folder_id]
+                }
+                created_file = service.files().create(
+                    body=file_metadata,
+                    media_body=media,
+                    fields='id,name,webViewLink'
+                ).execute()
+                print(f"✅ [Drive] 新增文件: {created_file.get('name')}")
+                print(f"   📁 文件 ID: {created_file.get('id')}")
+                print(f"   🔗 檢視連結: {created_file.get('webViewLink', 'N/A')}")
+                print(f"   💡 建議將此文件 ID 新增為 GitHub Secret")
+                return True
+            except Exception as create_error:
+                error_msg = str(create_error)
+                if '404' in error_msg or 'notFound' in error_msg:
+                    print(f"❌ [Drive] 資料夾不存在或無權限訪問")
+                    print(f"   📁 資料夾 ID: {folder_id}")
+                    print(f"   💡 解決方案:")
+                    print(f"      1. 確認資料夾 ID 是否正確")
+                    print(f"      2. 在 Google Drive 中分享資料夾給服務帳號: {service_account_email}")
+                    print(f"      3. 確保服務帳號有「編輯者」權限")
+                else:
+                    print(f"❌ [Drive] 創建文件失敗: {create_error}")
+                return False
         else:
-            # 雲端已存在，更新文件
-            file_id = files[0]['id']
-            service.files().update(
-                fileId=file_id,
-                media_body=media
-            ).execute()
-            print(f"✅ [Drive] 更新文件: {file_name} (ID: {file_id})")
+            print(f"⚠️ 未設置文件 ID 或資料夾 ID，無法上傳")
+            print(f"   💡 請設置以下其中一個:")
+            print(f"      - BEST_STRATEGIES_539_FILE_ID 或 BEST_STRATEGIES_FANTASY5_FILE_ID (推薦)")
+            print(f"      - GOOGLE_DRIVE_FOLDER_ID (備用)")
+            return False
         
         return True
 
@@ -320,7 +345,7 @@ def upload_to_drive(local_file, folder_id, creds_json):
 # ==========================================
 # 主流程
 # ==========================================
-def process_single(name, input_file, output_file, is_fantasy, folder_id, creds):
+def process_single(name, input_file, output_file, is_fantasy, file_id=None, folder_id=None, creds=None):
     """處理單一彩球的分析"""
     print(f"\n⚡ 分析 {name} (轉換時區: {is_fantasy})...")
     df = load_data(input_file, is_fantasy)
@@ -377,24 +402,17 @@ def process_single(name, input_file, output_file, is_fantasy, folder_id, creds):
         return False
     
     # 上傳到 Google Drive
-    if folder_id and creds:
+    if creds:
         try:
-            upload_to_drive(output_file, folder_id, creds)
+            upload_to_drive(output_file, file_id=file_id, folder_id=folder_id, creds_json=creds)
             print(f"✅ {output_file} 已上傳到 Google Drive")
         except Exception as e:
             print(f"⚠️ 上傳 {output_file} 到 Google Drive 時發生錯誤: {e}")
             print(f"   本地文件已創建: {output_file}")
     else:
-        # 檢查是哪個環境變數缺失
-        missing_vars = []
-        if not folder_id:
-            missing_vars.append("GOOGLE_DRIVE_FOLDER_ID")
-        if not creds:
-            missing_vars.append("GOOGLE_CREDENTIALS")
-        
-        print(f"⚠️ 未設置 Google Drive 環境變數: {', '.join(missing_vars)}")
+        print(f"⚠️ 未設置 GOOGLE_CREDENTIALS")
         print(f"   📄 本地文件已創建: {output_file}")
-        print(f"   💡 提示: 在 GitHub Actions 中，這些環境變數會自動從 Secrets 讀取")
+        print(f"   💡 提示: 在 GitHub Actions 中，環境變數會自動從 Secrets 讀取")
         print(f"   💡 本地測試時，可以手動設置環境變數或跳過上傳步驟")
     
     return True
@@ -403,14 +421,17 @@ def process_all():
     """處理所有彩球的分析（預設行為）"""
     folder_id = os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
     creds = os.environ.get('GOOGLE_CREDENTIALS')
+    
+    file_id_539 = os.environ.get('BEST_STRATEGIES_539_FILE_ID')
+    file_id_fantasy = os.environ.get('BEST_STRATEGIES_FANTASY5_FILE_ID')
 
     tasks = [
-        ("539", FILE_539, OUTPUT_539, False),
-        ("天天樂", FILE_FANTASY, OUTPUT_FANTASY, True)
+        ("539", FILE_539, OUTPUT_539, False, file_id_539),
+        ("天天樂", FILE_FANTASY, OUTPUT_FANTASY, True, file_id_fantasy)
     ]
 
-    for name, input_file, output_file, is_fantasy in tasks:
-        process_single(name, input_file, output_file, is_fantasy, folder_id, creds)
+    for name, input_file, output_file, is_fantasy, file_id in tasks:
+        process_single(name, input_file, output_file, is_fantasy, file_id=file_id, folder_id=folder_id, creds=creds)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='分析彩球策略')
@@ -421,13 +442,15 @@ if __name__ == "__main__":
     
     folder_id = os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
     creds = os.environ.get('GOOGLE_CREDENTIALS')
+    file_id_539 = os.environ.get('BEST_STRATEGIES_539_FILE_ID')
+    file_id_fantasy = os.environ.get('BEST_STRATEGIES_FANTASY5_FILE_ID')
     
     if args.type == '539':
         print("🎯 僅分析 539...")
-        process_single("539", FILE_539, OUTPUT_539, False, folder_id, creds)
+        process_single("539", FILE_539, OUTPUT_539, False, file_id=file_id_539, folder_id=folder_id, creds=creds)
     elif args.type == 'fantasy5':
         print("🎯 僅分析天天樂...")
-        process_single("天天樂", FILE_FANTASY, OUTPUT_FANTASY, True, folder_id, creds)
+        process_single("天天樂", FILE_FANTASY, OUTPUT_FANTASY, True, file_id=file_id_fantasy, folder_id=folder_id, creds=creds)
     else:
         print("🎯 分析所有彩球...")
         process_all()
