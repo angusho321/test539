@@ -231,6 +231,33 @@ def upload_to_drive(local_file, folder_id, creds_json):
         )
         service = build('drive', 'v3', credentials=creds)
         file_name = os.path.basename(local_file)
+        
+        # 獲取服務帳號郵件（用於調試）
+        service_account_email = creds_dict.get('client_email', 'unknown')
+        print(f"🔍 使用服務帳號: {service_account_email}")
+        print(f"🔍 目標資料夾 ID: {folder_id}")
+
+        # 先驗證資料夾是否存在且有權限
+        try:
+            folder_info = service.files().get(
+                fileId=folder_id,
+                fields='id,name,mimeType,permissions'
+            ).execute()
+            print(f"✅ 資料夾驗證成功: {folder_info.get('name', '未知')}")
+            print(f"   📁 資料夾 ID: {folder_info.get('id')}")
+            print(f"   📄 類型: {folder_info.get('mimeType', 'unknown')}")
+        except Exception as folder_error:
+            error_msg = str(folder_error)
+            if '404' in error_msg or 'notFound' in error_msg:
+                print(f"❌ [Drive] 資料夾不存在或無權限訪問")
+                print(f"   📁 資料夾 ID: {folder_id}")
+                print(f"   💡 解決方案:")
+                print(f"      1. 確認資料夾 ID 是否正確")
+                print(f"      2. 在 Google Drive 中分享資料夾給服務帳號: {service_account_email}")
+                print(f"      3. 確保服務帳號有「編輯者」權限")
+            else:
+                print(f"❌ [Drive] 驗證資料夾時發生錯誤: {folder_error}")
+            return False
 
         # 搜尋雲端是否已存在該文件
         query = f"name = '{file_name}' and '{folder_id}' in parents and trashed = false"
@@ -268,7 +295,24 @@ def upload_to_drive(local_file, folder_id, creds_json):
         print(f"❌ [Drive] 認證資訊格式錯誤: {e}")
         return False
     except Exception as e:
-        print(f"❌ [Drive] 上傳失敗: {e}")
+        error_msg = str(e)
+        print(f"❌ [Drive] 上傳失敗: {error_msg}")
+        
+        # 針對常見錯誤提供解決方案
+        if '404' in error_msg or 'notFound' in error_msg:
+            print(f"   💡 這通常是因為:")
+            print(f"      1. 資料夾 ID 不正確")
+            print(f"      2. 服務帳號沒有權限訪問該資料夾")
+            print(f"      3. 資料夾已被刪除")
+            print(f"   💡 解決方案:")
+            print(f"      1. 確認 GOOGLE_DRIVE_FOLDER_ID 是否正確")
+            print(f"      2. 在 Google Drive 中分享資料夾給服務帳號")
+            print(f"      3. 確保服務帳號有「編輯者」權限")
+        elif '403' in error_msg or 'permission' in error_msg.lower():
+            print(f"   💡 權限不足，請確認服務帳號有「編輯者」權限")
+        elif '401' in error_msg or 'unauthorized' in error_msg.lower():
+            print(f"   💡 認證失敗，請確認 GOOGLE_CREDENTIALS 是否正確")
+        
         import traceback
         traceback.print_exc()
         return False
