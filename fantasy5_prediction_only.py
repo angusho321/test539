@@ -36,7 +36,27 @@ SPECIAL_TAIL_NUMBERS = [9, 3, 7]  # 強勢尾數
 # 從原本的 lottery_analysis.py 複製核心函數
 def load_lottery_excel(excel_path: str):
     """讀入 .xlsx 開獎紀錄"""
-    return pd.read_excel(excel_path, engine='openpyxl')
+    df = pd.read_excel(excel_path, engine='openpyxl')
+    
+    # 確保日期欄位是 datetime 類型
+    if '日期' in df.columns:
+        # 嘗試多種日期格式解析
+        try:
+            df['日期'] = pd.to_datetime(df['日期'], format='mixed', errors='coerce')
+            # 如果還有無法解析的，嘗試其他格式
+            if df['日期'].isna().any():
+                df['日期'] = pd.to_datetime(df['日期'], format='%Y-%m-%d %H:%M:%S', errors='coerce')
+            if df['日期'].isna().any():
+                df['日期'] = pd.to_datetime(df['日期'], format='%Y-%m-%d', errors='coerce')
+            # 最後嘗試不指定格式
+            if df['日期'].isna().any():
+                df['日期'] = pd.to_datetime(df['日期'], errors='coerce')
+        except Exception as e:
+            logger.warning(f"⚠️ 日期轉換警告: {e}")
+            # 如果轉換失敗，嘗試不指定格式
+            df['日期'] = pd.to_datetime(df['日期'], errors='coerce')
+    
+    return df
 
 
 
@@ -46,6 +66,19 @@ def compute_weighted_frequency(df, decay_factor=0.95, recent_days=365):
     越近期的記錄權重越高，避免資料鈍化問題
     """
     try:
+        # 確保日期欄位是 datetime 類型
+        if '日期' in df.columns:
+            if not pd.api.types.is_datetime64_any_dtype(df['日期']):
+                # 如果日期欄位不是 datetime 類型，嘗試轉換
+                df = df.copy()
+                df['日期'] = pd.to_datetime(df['日期'], format='mixed', errors='coerce')
+                if df['日期'].isna().any():
+                    df['日期'] = pd.to_datetime(df['日期'], format='%Y-%m-%d %H:%M:%S', errors='coerce')
+                if df['日期'].isna().any():
+                    df['日期'] = pd.to_datetime(df['日期'], format='%Y-%m-%d', errors='coerce')
+                if df['日期'].isna().any():
+                    df['日期'] = pd.to_datetime(df['日期'], errors='coerce')
+        
         # 只取最近的記錄
         cutoff_date = datetime.now() - pd.Timedelta(days=recent_days)
         recent_df = df[df['日期'] >= cutoff_date].copy()

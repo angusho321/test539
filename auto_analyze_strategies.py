@@ -341,8 +341,17 @@ def process_single(name, input_file, output_file, is_fantasy, folder_id, creds):
             print(f"⚠️ 上傳 {output_file} 到 Google Drive 時發生錯誤: {e}")
             print(f"   本地文件已創建: {output_file}")
     else:
-        print(f"⚠️ 未設置 Google Drive 環境變數，跳過上傳")
-        print(f"   需要設置: GOOGLE_DRIVE_FOLDER_ID 和 GOOGLE_CREDENTIALS")
+        # 檢查是哪個環境變數缺失
+        missing_vars = []
+        if not folder_id:
+            missing_vars.append("GOOGLE_DRIVE_FOLDER_ID")
+        if not creds:
+            missing_vars.append("GOOGLE_CREDENTIALS")
+        
+        print(f"⚠️ 未設置 Google Drive 環境變數: {', '.join(missing_vars)}")
+        print(f"   📄 本地文件已創建: {output_file}")
+        print(f"   💡 提示: 在 GitHub Actions 中，這些環境變數會自動從 Secrets 讀取")
+        print(f"   💡 本地測試時，可以手動設置環境變數或跳過上傳步驟")
     
     return True
 
