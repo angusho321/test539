@@ -209,6 +209,7 @@ def upload_to_drive(local_file, file_id=None, folder_id=None, creds_json=None):
     """
     上傳文件到 Google Drive
     優先使用文件 ID 更新現有文件，如果沒有則使用資料夾 ID 創建新文件
+    如果本地文件是 CSV，會轉換為 XLSX 格式上傳
     """
     if not os.path.exists(local_file):
         print(f"❌ 本地文件不存在: {local_file}")
@@ -235,7 +236,41 @@ def upload_to_drive(local_file, file_id=None, folder_id=None, creds_json=None):
         service_account_email = creds_dict.get('client_email', 'unknown')
         print(f"🔍 使用服務帳號: {service_account_email}")
 
-        media = MediaFileUpload(local_file, mimetype='text/csv')
+        # 如果本地文件是 CSV，轉換為 XLSX（因為 Google Drive 上的文件是 XLSX）
+        upload_file = local_file
+        upload_mime_type = 'text/csv'
+        if local_file.endswith('.csv'):
+            # 轉換 CSV 為 XLSX
+            xlsx_file = local_file.replace('.csv', '.xlsx')
+            try:
+                df = pd.read_csv(local_file, encoding='utf-8-sig')
+                df.to_excel(xlsx_file, index=False, engine='openpyxl')
+                upload_file = xlsx_file
+                upload_mime_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                print(f"📊 已將 CSV 轉換為 XLSX: {xlsx_file}")
+            except Exception as e:
+                print(f"⚠️ CSV 轉換為 XLSX 失敗，使用原始 CSV: {e}")
+                # 繼續使用 CSV
+        
+        # 如果目標文件是 XLSX，更新文件名
+        if file_id:
+            # 檢查目標文件類型
+            try:
+                file_info = service.files().get(fileId=file_id, fields='name,mimeType').execute()
+                target_name = file_info.get('name', '')
+                if target_name.endswith('.xlsx') and upload_file.endswith('.csv'):
+                    # 目標是 XLSX，但我們有 CSV，需要轉換
+                    if not upload_file.endswith('.xlsx'):
+                        xlsx_file = local_file.replace('.csv', '.xlsx')
+                        df = pd.read_csv(local_file, encoding='utf-8-sig')
+                        df.to_excel(xlsx_file, index=False, engine='openpyxl')
+                        upload_file = xlsx_file
+                        upload_mime_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                        print(f"📊 已將 CSV 轉換為 XLSX 以匹配目標文件格式")
+            except:
+                pass  # 如果無法獲取文件資訊，繼續使用原始文件
+
+        media = MediaFileUpload(upload_file, mimetype=upload_mime_type)
 
         # 優先嘗試使用文件 ID 更新現有文件
         if file_id:
@@ -258,6 +293,15 @@ def upload_to_drive(local_file, file_id=None, folder_id=None, creds_json=None):
                 ).execute()
                 print(f"✅ [Drive] 更新文件: {updated_file.get('name')} (ID: {file_id})")
                 print(f"   🔗 檢視連結: {updated_file.get('webViewLink', 'N/A')}")
+                
+                # 清理臨時創建的 XLSX 文件（如果原始是 CSV）
+                if upload_file != local_file and upload_file.endswith('.xlsx'):
+                    try:
+                        os.remove(upload_file)
+                        print(f"🧹 已清理臨時文件: {upload_file}")
+                    except:
+                        pass
+                
                 return True
             except Exception as update_error:
                 error_msg = str(update_error)
@@ -267,10 +311,10 @@ def upload_to_drive(local_file, file_id=None, folder_id=None, creds_json=None):
                     print(f"⚠️ 更新文件失敗: {update_error}")
                     print(f"   嘗試其他解決方案...")
 
-        # 如果沒有文件 ID 或更新失敗，嘗試使用資料夾 ID 創建新文件
+        # 如果沒有文件 ID 或更新失敗，嘗試在資料夾中搜索現有文件或創建新文件
         if folder_id:
             try:
-                print(f"🔍 嘗試在資料夾中創建新文件...")
+                print(f"🔍 嘗試在資料夾中查找或創建文件...")
                 print(f"   📁 資料夾 ID: {folder_id}")
                 
                 # 驗證資料夾是否存在
@@ -280,21 +324,62 @@ def upload_to_drive(local_file, file_id=None, folder_id=None, creds_json=None):
                 ).execute()
                 print(f"✅ 資料夾驗證成功: {folder_info.get('name', '未知')}")
                 
-                # 創建新文件
-                file_metadata = {
-                    'name': file_name,
-                    'parents': [folder_id]
-                }
-                created_file = service.files().create(
-                    body=file_metadata,
-                    media_body=media,
-                    fields='id,name,webViewLink'
-                ).execute()
-                print(f"✅ [Drive] 新增文件: {created_file.get('name')}")
-                print(f"   📁 文件 ID: {created_file.get('id')}")
-                print(f"   🔗 檢視連結: {created_file.get('webViewLink', 'N/A')}")
-                print(f"   💡 建議將此文件 ID 新增為 GitHub Secret")
-                return True
+                # 嘗試在資料夾中搜索現有的 XLSX 文件（匹配文件名）
+                # 如果本地是 CSV，搜索對應的 XLSX 文件名
+                search_name = file_name.replace('.csv', '.xlsx') if file_name.endswith('.csv') else file_name
+                query = f"name = '{search_name}' and '{folder_id}' in parents and trashed = false"
+                results = service.files().list(q=query, fields="files(id, name)").execute()
+                existing_files = results.get('files', [])
+                
+                if existing_files:
+                    # 找到現有文件，更新它
+                    existing_file_id = existing_files[0]['id']
+                    print(f"📄 找到現有文件: {existing_files[0]['name']} (ID: {existing_file_id})")
+                    updated_file = service.files().update(
+                        fileId=existing_file_id,
+                        media_body=media,
+                        fields='id,name,webViewLink'
+                    ).execute()
+                    print(f"✅ [Drive] 更新現有文件: {updated_file.get('name')} (ID: {existing_file_id})")
+                    print(f"   🔗 檢視連結: {updated_file.get('webViewLink', 'N/A')}")
+                    print(f"   💡 建議將此文件 ID ({existing_file_id}) 新增為 GitHub Secret")
+                    
+                    # 清理臨時創建的 XLSX 文件（如果原始是 CSV）
+                    if upload_file != local_file and upload_file.endswith('.xlsx'):
+                        try:
+                            os.remove(upload_file)
+                            print(f"🧹 已清理臨時文件: {upload_file}")
+                        except:
+                            pass
+                    
+                    return True
+                else:
+                    # 沒有找到現有文件，創建新文件
+                    # 使用 XLSX 格式（如果已轉換）
+                    create_name = search_name if upload_file.endswith('.xlsx') else file_name
+                    file_metadata = {
+                        'name': create_name,
+                        'parents': [folder_id]
+                    }
+                    created_file = service.files().create(
+                        body=file_metadata,
+                        media_body=media,
+                        fields='id,name,webViewLink'
+                    ).execute()
+                    print(f"✅ [Drive] 新增文件: {created_file.get('name')}")
+                    print(f"   📁 文件 ID: {created_file.get('id')}")
+                    print(f"   🔗 檢視連結: {created_file.get('webViewLink', 'N/A')}")
+                    print(f"   💡 建議將此文件 ID ({created_file.get('id')}) 新增為 GitHub Secret")
+                    
+                    # 清理臨時創建的 XLSX 文件（如果原始是 CSV）
+                    if upload_file != local_file and upload_file.endswith('.xlsx'):
+                        try:
+                            os.remove(upload_file)
+                            print(f"🧹 已清理臨時文件: {upload_file}")
+                        except:
+                            pass
+                    
+                    return True
             except Exception as create_error:
                 error_msg = str(create_error)
                 if '404' in error_msg or 'notFound' in error_msg:
