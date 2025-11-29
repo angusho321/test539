@@ -311,92 +311,116 @@ def upload_to_drive(local_file, file_id=None, folder_id=None, creds_json=None):
                     print(f"⚠️ 更新文件失敗: {update_error}")
                     print(f"   嘗試其他解決方案...")
 
-        # 如果沒有文件 ID 或更新失敗，嘗試在資料夾中搜索現有文件或創建新文件
-        if folder_id:
-            try:
-                print(f"🔍 嘗試在資料夾中查找或創建文件...")
-                print(f"   📁 資料夾 ID: {folder_id}")
-                
-                # 驗證資料夾是否存在
-                folder_info = service.files().get(
-                    fileId=folder_id,
-                    fields='id,name,mimeType'
-                ).execute()
-                print(f"✅ 資料夾驗證成功: {folder_info.get('name', '未知')}")
-                
-                # 嘗試在資料夾中搜索現有的 XLSX 文件（匹配文件名）
-                # 如果本地是 CSV，搜索對應的 XLSX 文件名
-                search_name = file_name.replace('.csv', '.xlsx') if file_name.endswith('.csv') else file_name
+        # 如果沒有文件 ID 或更新失敗，嘗試搜索現有文件或創建新文件
+        # 優先在根目錄搜索（與其他文件同路徑），如果提供了資料夾 ID 則在資料夾中搜索
+        try:
+            # 搜索文件名（如果本地是 CSV，搜索對應的 XLSX 文件名）
+            search_name = file_name.replace('.csv', '.xlsx') if file_name.endswith('.csv') else file_name
+            print(f"🔍 嘗試搜索現有文件: {search_name}")
+            
+            # 構建搜索查詢
+            if folder_id:
+                # 在指定資料夾中搜索
+                print(f"   📁 在資料夾中搜索 (ID: {folder_id})")
                 query = f"name = '{search_name}' and '{folder_id}' in parents and trashed = false"
-                results = service.files().list(q=query, fields="files(id, name)").execute()
-                existing_files = results.get('files', [])
+            else:
+                # 在根目錄搜索（不指定 parents，與其他文件同路徑）
+                print(f"   📁 在根目錄搜索（與其他文件同路徑）")
+                query = f"name = '{search_name}' and trashed = false"
+                # 排除在資料夾中的文件（只搜索根目錄）
+                # 注意：Google Drive API 無法直接搜索根目錄，我們需要先搜索所有同名文件，然後過濾
+            
+            # 搜索文件
+            # 如果沒有指定資料夾，搜索所有同名文件（包括根目錄和資料夾中的）
+            if not folder_id:
+                # 搜索所有同名文件
+                query = f"name = '{search_name}' and trashed = false"
+            
+            results = service.files().list(q=query, fields="files(id, name, parents)").execute()
+            existing_files = results.get('files', [])
+            
+            # 如果沒有指定資料夾，優先選擇根目錄的文件（與其他文件同路徑）
+            if not folder_id and existing_files:
+                # 嘗試找到與其他文件（如 fantasy5_hist.xlsx）同路徑的文件
+                # 先獲取一個參考文件的 parents（如果可能）
+                try:
+                    # 嘗試獲取 fantasy5_hist 或 prediction_log 的 parents 作為參考
+                    ref_file_id = os.environ.get('FANTASY5_HIST_FILE_ID') or os.environ.get('FANTASY5_PREDICTION_LOG_FILE_ID')
+                    if ref_file_id:
+                        ref_info = service.files().get(fileId=ref_file_id, fields='parents').execute()
+                        ref_parents = ref_info.get('parents', [])
+                        # 優先選擇與參考文件相同 parents 的文件
+                        matching_files = [f for f in existing_files if f.get('parents', []) == ref_parents]
+                        if matching_files:
+                            existing_files = matching_files
+                except:
+                    pass  # 如果無法獲取參考，使用所有找到的文件
+            
+            if existing_files:
+                # 找到現有文件，更新它
+                existing_file_id = existing_files[0]['id']
+                existing_file_name = existing_files[0]['name']
+                print(f"📄 找到現有文件: {existing_file_name} (ID: {existing_file_id})")
+                updated_file = service.files().update(
+                    fileId=existing_file_id,
+                    media_body=media,
+                    fields='id,name,webViewLink'
+                ).execute()
+                print(f"✅ [Drive] 更新現有文件: {updated_file.get('name')} (ID: {existing_file_id})")
+                print(f"   🔗 檢視連結: {updated_file.get('webViewLink', 'N/A')}")
+                print(f"   💡 建議將此文件 ID ({existing_file_id}) 新增為 GitHub Secret")
                 
-                if existing_files:
-                    # 找到現有文件，更新它
-                    existing_file_id = existing_files[0]['id']
-                    print(f"📄 找到現有文件: {existing_files[0]['name']} (ID: {existing_file_id})")
-                    updated_file = service.files().update(
-                        fileId=existing_file_id,
-                        media_body=media,
-                        fields='id,name,webViewLink'
-                    ).execute()
-                    print(f"✅ [Drive] 更新現有文件: {updated_file.get('name')} (ID: {existing_file_id})")
-                    print(f"   🔗 檢視連結: {updated_file.get('webViewLink', 'N/A')}")
-                    print(f"   💡 建議將此文件 ID ({existing_file_id}) 新增為 GitHub Secret")
-                    
-                    # 清理臨時創建的 XLSX 文件（如果原始是 CSV）
-                    if upload_file != local_file and upload_file.endswith('.xlsx'):
-                        try:
-                            os.remove(upload_file)
-                            print(f"🧹 已清理臨時文件: {upload_file}")
-                        except:
-                            pass
-                    
-                    return True
+                # 清理臨時創建的 XLSX 文件（如果原始是 CSV）
+                if upload_file != local_file and upload_file.endswith('.xlsx'):
+                    try:
+                        os.remove(upload_file)
+                        print(f"🧹 已清理臨時文件: {upload_file}")
+                    except:
+                        pass
+                
+                return True
+            else:
+                # 沒有找到現有文件，創建新文件
+                print(f"📝 未找到現有文件，創建新文件...")
+                create_name = search_name if upload_file.endswith('.xlsx') else file_name
+                file_metadata = {
+                    'name': create_name
+                }
+                
+                # 如果指定了資料夾，設定父資料夾；否則創建在根目錄
+                if folder_id:
+                    file_metadata['parents'] = [folder_id]
+                    print(f"   📁 目標資料夾 ID: {folder_id}")
                 else:
-                    # 沒有找到現有文件，創建新文件
-                    # 使用 XLSX 格式（如果已轉換）
-                    create_name = search_name if upload_file.endswith('.xlsx') else file_name
-                    file_metadata = {
-                        'name': create_name,
-                        'parents': [folder_id]
-                    }
-                    created_file = service.files().create(
-                        body=file_metadata,
-                        media_body=media,
-                        fields='id,name,webViewLink'
-                    ).execute()
-                    print(f"✅ [Drive] 新增文件: {created_file.get('name')}")
-                    print(f"   📁 文件 ID: {created_file.get('id')}")
-                    print(f"   🔗 檢視連結: {created_file.get('webViewLink', 'N/A')}")
-                    print(f"   💡 建議將此文件 ID ({created_file.get('id')}) 新增為 GitHub Secret")
-                    
-                    # 清理臨時創建的 XLSX 文件（如果原始是 CSV）
-                    if upload_file != local_file and upload_file.endswith('.xlsx'):
-                        try:
-                            os.remove(upload_file)
-                            print(f"🧹 已清理臨時文件: {upload_file}")
-                        except:
-                            pass
-                    
-                    return True
-            except Exception as create_error:
-                error_msg = str(create_error)
-                if '404' in error_msg or 'notFound' in error_msg:
-                    print(f"❌ [Drive] 資料夾不存在或無權限訪問")
-                    print(f"   📁 資料夾 ID: {folder_id}")
-                    print(f"   💡 解決方案:")
-                    print(f"      1. 確認資料夾 ID 是否正確")
-                    print(f"      2. 在 Google Drive 中分享資料夾給服務帳號: {service_account_email}")
-                    print(f"      3. 確保服務帳號有「編輯者」權限")
-                else:
-                    print(f"❌ [Drive] 創建文件失敗: {create_error}")
-                return False
-        else:
-            print(f"⚠️ 未設置文件 ID 或資料夾 ID，無法上傳")
-            print(f"   💡 請設置以下其中一個:")
-            print(f"      - BEST_STRATEGIES_539_FILE_ID 或 BEST_STRATEGIES_FANTASY5_FILE_ID (推薦)")
-            print(f"      - GOOGLE_DRIVE_FOLDER_ID (備用)")
+                    print(f"   📁 創建在根目錄（與其他文件同路徑）")
+                
+                created_file = service.files().create(
+                    body=file_metadata,
+                    media_body=media,
+                    fields='id,name,webViewLink'
+                ).execute()
+                print(f"✅ [Drive] 新增文件: {created_file.get('name')}")
+                print(f"   📁 文件 ID: {created_file.get('id')}")
+                print(f"   🔗 檢視連結: {created_file.get('webViewLink', 'N/A')}")
+                print(f"   💡 建議將此文件 ID ({created_file.get('id')}) 新增為 GitHub Secret")
+                
+                # 清理臨時創建的 XLSX 文件（如果原始是 CSV）
+                if upload_file != local_file and upload_file.endswith('.xlsx'):
+                    try:
+                        os.remove(upload_file)
+                        print(f"🧹 已清理臨時文件: {upload_file}")
+                    except:
+                        pass
+                
+                return True
+                
+        except Exception as create_error:
+            error_msg = str(create_error)
+            print(f"❌ [Drive] 搜索或創建文件失敗: {create_error}")
+            if '404' in error_msg or 'notFound' in error_msg:
+                if folder_id:
+                    print(f"   💡 如果文件在根目錄，請不要設置 GOOGLE_DRIVE_FOLDER_ID")
+                    print(f"   💡 或者直接設置 BEST_STRATEGIES_FANTASY5_FILE_ID 或 BEST_STRATEGIES_539_FILE_ID")
             return False
         
         return True
