@@ -41,11 +41,30 @@ def load_data(file_path, is_fantasy=False):
         df = pd.read_excel(file_path, engine='openpyxl')
     except:
         try:
-            df = pd.read_csv(file_path.replace('.xlsx', '.csv')) # 備援
+            # 嘗試讀取 CSV（可能是 fantasy5_hist.xlsx - Sheet1.csv）
+            csv_path = file_path.replace('.xlsx', '.csv')
+            if not os.path.exists(csv_path):
+                # 嘗試其他可能的 CSV 檔名
+                csv_path = file_path.replace('.xlsx', ' - Sheet1.csv')
+            df = pd.read_csv(csv_path) # 備援
         except:
             return None
 
-    df['日期'] = pd.to_datetime(df['日期'])
+    # 處理日期欄位：支援多種日期格式（包含或不包含時間）
+    try:
+        # 先嘗試解析為 datetime，讓 pandas 自動推斷格式
+        df['日期'] = pd.to_datetime(df['日期'], format='mixed', errors='coerce')
+        # 如果自動推斷失敗，嘗試常見格式
+        if df['日期'].isna().any():
+            df['日期'] = pd.to_datetime(df['日期'], format='%Y-%m-%d %H:%M:%S', errors='coerce')
+        if df['日期'].isna().any():
+            df['日期'] = pd.to_datetime(df['日期'], format='%Y-%m-%d', errors='coerce')
+    except:
+        # 最後嘗試不指定格式，讓 pandas 自動處理
+        df['日期'] = pd.to_datetime(df['日期'], errors='coerce')
+    
+    # 移除無法解析的日期行
+    df = df.dropna(subset=['日期'])
     
     # 時區處理
     if is_fantasy:
