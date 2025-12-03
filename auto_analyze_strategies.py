@@ -17,50 +17,66 @@ from googleapiclient.http import MediaFileUpload
 FILE_539 = 'lottery_hist.xlsx'
 FILE_FANTASY = 'fantasy5_hist.xlsx'
 
-OUTPUT_539 = 'best_strategies_539.csv'
-OUTPUT_FANTASY = 'best_strategies_fantasy5.csv'
+OUTPUT_539 = 'best_strategies_539.xlsx'
+OUTPUT_FANTASY = 'best_strategies_fantasy5.xlsx'
 
-# 視窗定義 (對應 Python weekday: 0=週一 ... 6=週日)
-WINDOWS_MAPPING = {
-    "週一~週三": [0, 1, 2],
-    "週二~週四": [1, 2, 3],
-    "週三~週五": [2, 3, 4],
-    "週四~週六": [3, 4, 5]
+# 時間段定義 (對應 Python weekday: 0=週一 ... 6=週日)
+TIME_WINDOWS = {
+    "周一至周三": [0, 1, 2],  # 週一、週二、週三
+    "周二至周四": [1, 2, 3],  # 週二、週三、週四
+    "周三至周五": [2, 3, 4],  # 週三、週四、週五
+    "周四至周六": [3, 4, 5]   # 週四、週五、週六
 }
+
+# 使用近一年的紀錄
+RECENT_YEARS = 1
 
 # ==========================================
 # 核心演算法
 # ==========================================
 
 def load_data(file_path, is_fantasy=False):
-    """讀取資料並處理時區"""
-    if not os.path.exists(file_path):
-        return None
+    """讀取資料並處理時區，只保留近一年的紀錄"""
+    df = None
     
-    try:
-        df = pd.read_excel(file_path, engine='openpyxl')
-    except:
+    # 先嘗試讀取 Excel
+    if os.path.exists(file_path):
         try:
-            # 嘗試讀取 CSV（可能是 fantasy5_hist.xlsx - Sheet1.csv）
-            csv_path = file_path.replace('.xlsx', '.csv')
-            if not os.path.exists(csv_path):
-                # 嘗試其他可能的 CSV 檔名
-                csv_path = file_path.replace('.xlsx', ' - Sheet1.csv')
-            df = pd.read_csv(csv_path) # 備援
-        except:
-            return None
+            df = pd.read_excel(file_path, engine='openpyxl')
+        except Exception as e:
+            print(f"   ⚠️ 讀取 Excel 失敗: {e}，嘗試 CSV...")
+    
+    # 如果 Excel 不存在或讀取失敗，嘗試 CSV
+    if df is None:
+        # 嘗試多種可能的 CSV 檔名
+        csv_paths = [
+            file_path.replace('.xlsx', '.csv'),
+            file_path.replace('.xlsx', ' - Sheet1.csv'),
+            file_path + ' - Sheet1.csv'
+        ]
+        
+        for csv_path in csv_paths:
+            if os.path.exists(csv_path):
+                try:
+                    df = pd.read_csv(csv_path, encoding='utf-8-sig')
+                    print(f"   📄 從 CSV 讀取: {csv_path}")
+                    break
+                except Exception as e:
+                    print(f"   ⚠️ 讀取 CSV 失敗 ({csv_path}): {e}")
+                    continue
+    
+    if df is None:
+        print(f"❌ 無法讀取文件: {file_path}")
+        return None
 
     # 處理日期欄位：支援多種日期格式（包含或不包含時間）
     try:
-        # 先嘗試解析為 datetime，讓 pandas 自動推斷格式
         df['日期'] = pd.to_datetime(df['日期'], format='mixed', errors='coerce')
-        # 如果自動推斷失敗，嘗試常見格式
         if df['日期'].isna().any():
             df['日期'] = pd.to_datetime(df['日期'], format='%Y-%m-%d %H:%M:%S', errors='coerce')
         if df['日期'].isna().any():
             df['日期'] = pd.to_datetime(df['日期'], format='%Y-%m-%d', errors='coerce')
     except:
-        # 最後嘗試不指定格式，讓 pandas 自動處理
         df['日期'] = pd.to_datetime(df['日期'], errors='coerce')
     
     # 移除無法解析的日期行
@@ -73,134 +89,156 @@ def load_data(file_path, is_fantasy=False):
     else:
         # 539: 不需要轉換
         df['Analysis_Date'] = df['日期']
-
+    
+    # 計算近一年的日期範圍
+    max_date = df['Analysis_Date'].max()
+    cutoff_date = max_date - pd.Timedelta(days=365 * RECENT_YEARS)
+    
+    # 只保留近一年的紀錄
+    df = df[df['Analysis_Date'] >= cutoff_date].copy()
+    
+    # 按日期排序（最舊的在前）
+    df = df.sort_values('Analysis_Date', ascending=True).reset_index(drop=True)
+    
+    print(f"   📊 已載入 {len(df)} 筆近一年紀錄")
+    if len(df) > 0:
+        print(f"   📅 日期範圍: {df['Analysis_Date'].min()} 至 {df['Analysis_Date'].max()}")
+    
     return df
 
-def get_data_by_week(df):
-    """將資料轉換為 {(年, 週): {星期幾: {號碼集合}}}"""
-    data = defaultdict(lambda: defaultdict(set))
-    for _, row in df.iterrows():
-        dt = row['Analysis_Date']
-        year, week, _ = dt.isocalendar()
-        weekday = dt.weekday()
-        
-        # 嘗試抓取號碼欄位 (相容不同命名)
-        try:
-            # 優先嘗試標準欄位
-            if '號碼1' in df.columns:
-                nums = {row[c] for c in ['號碼1', '號碼2', '號碼3', '號碼4', '號碼5']}
-            else:
-                # 假設結構固定
-                cols = df.columns
-                nums = {row[cols[2]], row[cols[3]], row[cols[4]], row[cols[5]], row[cols[6]]}
-        except:
-            continue
-            
-        data[(year, week)][weekday] = nums
-    return data
+def extract_numbers(row, is_fantasy=False):
+    """從資料列中提取號碼"""
+    try:
+        if '號碼1' in row.index:
+            nums = [int(row['號碼1']), int(row['號碼2']), int(row['號碼3']), 
+                   int(row['號碼4']), int(row['號碼5'])]
+        else:
+            # 嘗試其他可能的欄位名稱
+            cols = row.index.tolist()
+            nums = [int(row[cols[2]]), int(row[cols[3]]), int(row[cols[4]]), 
+                   int(row[cols[5]]), int(row[cols[6]])]
+        return set(nums)
+    except:
+        return None
 
-def calculate_stats(data_by_week, weeks_list, mode="win_rate"):
+def calculate_window_win_rate(df, window_name, window_days, is_fantasy=False):
     """
-    通用計算核心
-    mode="win_rate": 計算勝率 (短期/長期)
-    mode="streak": 計算連莊 (從最新週往回推)
+    計算指定時間段的勝率（優化版本）
+    規則：三個號碼中任一個在該時間段（三天）的任一天出現即算中獎
+    
+    返回: [{'combo': tuple, 'win_rate': float, 'wins': int, 'total': int}, ...]
     """
+    # 過濾出該時間段的資料
+    window_data = df[df['Analysis_Date'].dt.weekday.isin(window_days)].copy()
+    
+    if len(window_data) == 0:
+        return []
+    
+    # 預先提取所有號碼集合，避免重複計算
+    window_data['Numbers'] = window_data.apply(
+        lambda row: extract_numbers(row, is_fantasy), axis=1
+    )
+    window_data = window_data[window_data['Numbers'].notna()].copy()
+    
+    # 將資料按週分組，並預先計算每週的號碼聯集
+    window_data['YearWeek'] = window_data['Analysis_Date'].apply(
+        lambda x: (x.isocalendar()[0], x.isocalendar()[1])
+    )
+    
+    # 預先計算每週的號碼聯集（該週時間段內所有開出的號碼）
+    week_unions = {}
+    for (year, week), group in window_data.groupby('YearWeek'):
+        union_set = set()
+        for nums in group['Numbers']:
+            if nums:
+                union_set.update(nums)
+        week_unions[(year, week)] = union_set
+    
+    total_weeks = len(week_unions)
+    if total_weeks == 0:
+        return []
+    
+    # 獲取所有可能的3碼組合
+    max_num = 39 if not is_fantasy else 39  # 539和Fantasy5都是1-39
+    all_combos = list(combinations(range(1, max_num + 1), 3))
+    total_combos = len(all_combos)
+    
     results = []
-    all_combos = list(combinations(range(1, 40), 3)) # 1-39號取3個
     
-    # 預處理每週的號碼聯集 (針對不同視窗)
-    # week_unions[window_name][week_key] = set(all numbers in that window)
-    week_unions = defaultdict(dict)
+    # 顯示進度
+    print(f"         計算中... (共 {total_combos} 組組合, {total_weeks} 週)", end='', flush=True)
     
-    # 如果是連莊模式，必須確保週次是倒序 (最新 -> 最舊)
-    target_weeks = sorted(weeks_list, reverse=True) if mode == "streak" else weeks_list
-    
-    for window_name, days in WINDOWS_MAPPING.items():
-        for w in target_weeks:
-            union_set = set()
-            has_data = False
-            for d in days:
-                if d in data_by_week[w]:
-                    union_set.update(data_by_week[w][d])
-                    has_data = True
-            if has_data:
-                week_unions[window_name][w] = union_set
-
-    # 開始遍歷所有組合 (9139組)
-    for combo in all_combos:
+    for idx, combo in enumerate(all_combos):
+        # 每1000個組合顯示一次進度
+        if idx % 1000 == 0 and idx > 0:
+            progress = (idx / total_combos) * 100
+            print(f"\r         進度: {progress:.1f}% ({idx}/{total_combos})", end='', flush=True)
+        
         combo_set = set(combo)
+        wins = 0
         
-        for window_name in WINDOWS_MAPPING.keys():
-            valid_weeks = [w for w in target_weeks if w in week_unions[window_name]]
-            if len(valid_weeks) < 4 and mode == "win_rate": continue
-            
-            if mode == "win_rate":
-                wins = 0
-                for w in valid_weeks:
-                    # 判斷中獎: 組合 與 當週開獎號碼 有交集
-                    if not combo_set.isdisjoint(week_unions[window_name][w]):
-                        wins += 1
-                
-                rate = wins / len(valid_weeks)
-                # 門檻過濾
-                if rate >= 0.8: # 寬鬆門檻，後續篩選 Top 2
-                    results.append({
-                        "Window": window_name,
-                        "Combo": combo,
-                        "Score": rate, # 排序用
-                        "Display": f"{rate:.1%} ({wins}/{len(valid_weeks)})"
-                    })
-            
-            elif mode == "streak":
-                streak = 0
-                for w in valid_weeks:
-                    if not combo_set.isdisjoint(week_unions[window_name][w]):
-                        streak += 1
-                    else:
-                        break # 中斷
-                
-                if streak >= 4: # 至少連4週才紀錄
-                    results.append({
-                        "Window": window_name,
-                        "Combo": combo,
-                        "Score": streak,
-                        "Display": f"{streak}週"
-                    })
-
-    return pd.DataFrame(results)
-
-def select_best_strategies(df, threshold=0.0):
-    """
-    挑選邏輯:
-    1. 過濾分數 < threshold
-    2. 選第一名 (Score 最高)
-    3. 選第二名 (Score 次高，且 Window 與第一名不同)
-    """
-    if df.empty:
-        return "無數據", "無數據"
+        # 使用預先計算的週聯集，快速判斷
+        for week_union in week_unions.values():
+            # 如果組合與該週的號碼聯集有交集，則中獎
+            if not combo_set.isdisjoint(week_union):
+                wins += 1
         
-    df = df[df['Score'] >= threshold].sort_values('Score', ascending=False)
-    if df.empty:
-        return "無數據", "無數據"
-        
-    # 第一名
-    top1 = df.iloc[0]
+        win_rate = wins / total_weeks
+        results.append({
+            'combo': combo,
+            'win_rate': win_rate,
+            'wins': wins,
+            'total': total_weeks
+        })
     
-    # 第二名 (互斥視窗)
-    top2 = None
-    for _, row in df.iterrows():
-        if row['Window'] != top1['Window']:
-            top2 = row
-            break
-            
-    def format_row(row):
-        nums = ",".join(f"{x:02d}" for x in row['Combo'])
-        return f"【{row['Window']}】{nums} [{row['Display']}]"
+    # 按勝率排序，取前十名
+    results.sort(key=lambda x: x['win_rate'], reverse=True)
+    print(f"\r         完成！找到 {len(results)} 組結果" + " " * 40)  # 清除進度顯示
+    return results[:10]
 
-    res1 = format_row(top1)
-    res2 = format_row(top2) if top2 is not None else "無互斥時段數據"
+def format_combo_result(result):
+    """格式化組合結果"""
+    combo_str = ",".join(f"{x:02d}" for x in result['combo'])
+    win_rate_pct = result['win_rate'] * 100
+    return f"{combo_str} [{win_rate_pct:.1f}% ({result['wins']}/{result['total']})]"
+
+def generate_predictions(df, is_fantasy=False):
+    """
+    生成所有時間段的預測
+    返回: DataFrame，包含四個時間段的勝率前十名
+    """
+    print(f"   🔍 開始計算各時間段勝率...")
     
-    return res1, res2
+    # 計算每個時間段的勝率前十名
+    window_results = {}
+    for window_name, window_days in TIME_WINDOWS.items():
+        print(f"      -> 計算 {window_name}...")
+        results = calculate_window_win_rate(df, window_name, window_days, is_fantasy)
+        window_results[window_name] = results
+    
+    # 構建輸出 DataFrame
+    # 找出最長的結果列表（最多10個）
+    max_len = max(len(results) for results in window_results.values()) if window_results else 0
+    
+    # 創建輸出數據
+    output_data = {
+        "周一至周三": [],
+        "周二至周四": [],
+        "周三至周五": [],
+        "周四至周六": []
+    }
+    
+    for i in range(max_len):
+        for window_name in TIME_WINDOWS.keys():
+            if i < len(window_results[window_name]):
+                output_data[window_name].append(format_combo_result(window_results[window_name][i]))
+            else:
+                output_data[window_name].append("")
+    
+    # 創建 DataFrame
+    result_df = pd.DataFrame(output_data)
+    
+    return result_df
 
 # ==========================================
 # Google Drive 上傳
@@ -457,53 +495,23 @@ def upload_to_drive(local_file, file_id=None, folder_id=None, creds_json=None):
 def process_single(name, input_file, output_file, is_fantasy, file_id=None, folder_id=None, creds=None):
     """處理單一彩球的分析"""
     print(f"\n⚡ 分析 {name} (轉換時區: {is_fantasy})...")
+    
+    # 載入資料（只保留最新365筆）
     df = load_data(input_file, is_fantasy)
-    if df is None:
-        print(f"❌ 找不到 {input_file}，跳過")
+    if df is None or len(df) == 0:
+        print(f"❌ 找不到或無法讀取 {input_file}，跳過")
         return False
-        
-    # 日期篩選
-    max_date = df['Analysis_Date'].max()
-    cutoff_8wk = max_date - pd.Timedelta(weeks=8)
-    cutoff_1yr = max_date - pd.Timedelta(weeks=52)
     
-    data_by_week = get_data_by_week(df)
-    all_weeks = sorted(data_by_week.keys())
+    # 生成預測
+    result_df = generate_predictions(df, is_fantasy)
     
-    weeks_8wk = [w for w in all_weeks if w in get_data_by_week(df[df['Analysis_Date'] >= cutoff_8wk])][1:] # 略過資料不全的當週
-    weeks_1yr = [w for w in all_weeks if w in get_data_by_week(df[df['Analysis_Date'] >= cutoff_1yr])]
-    
-    # 1. 短期 (8週)
-    print("   -> 計算短期勝率...")
-    df_short = calculate_stats(data_by_week, weeks_8wk, mode="win_rate")
-    
-    # 2. 長期 (1年)
-    print("   -> 計算長期勝率...")
-    df_long = calculate_stats(data_by_week, weeks_1yr, mode="win_rate")
-    
-    # 3. 連莊
-    print("   -> 計算連莊霸主...")
-    df_streak = calculate_stats(data_by_week, all_weeks, mode="streak")
-    
-    # 彙整
-    report = []
-    
-    # 短期 (門檻 85%)
-    s1, s2 = select_best_strategies(df_short, threshold=0.85)
-    report.append({"策略維度": "短期爆發 (近8週)", "第一組": s1, "第二組": s2})
-    
-    # 長期 (門檻 90%，低於顯示無數據)
-    l1, l2 = select_best_strategies(df_long, threshold=0.90)
-    report.append({"策略維度": "長期穩健 (近1年)", "第一組": l1, "第二組": l2})
-    
-    # 連莊 (至少連5週)
-    st1, st2 = select_best_strategies(df_streak, threshold=5)
-    report.append({"策略維度": "連莊霸主 (連勝中)", "第一組": st1, "第二組": st2})
-    
-    # 輸出 CSV (確保一定會創建文件)
-    res_df = pd.DataFrame(report)
-    res_df.to_csv(output_file, index=False, encoding='utf-8-sig')
-    print(f"📄 已建立: {output_file}")
+    # 輸出 XLSX
+    try:
+        result_df.to_excel(output_file, index=False, engine='openpyxl')
+        print(f"📄 已建立: {output_file}")
+    except Exception as e:
+        print(f"❌ 建立文件失敗: {e}")
+        return False
     
     # 驗證文件確實存在
     if not os.path.exists(output_file):

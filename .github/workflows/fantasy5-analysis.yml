@@ -2,8 +2,8 @@ name: 🎲 California Fantasy 5 Lottery Automation
 
 on:
   schedule:
-    # 晚上 22:00 (台灣時間) - 加州Fantasy 5完整流程
-    - cron: '0 14 * * *'   # UTC 14:00 = 台灣 22:00
+    # 每週一晚上 22:00 (台灣時間) - 執行策略分析
+    - cron: '0 14 * * 1'   # UTC 14:00 每週一 = 台灣時間週一 22:00
   workflow_dispatch: {} # 允許手動觸發
 
 jobs:
@@ -73,27 +73,10 @@ jobs:
     # ========================================================
     - name: 🧠 Run Advanced Strategy Analysis (Fantasy5 only)
       env:
-        BEST_STRATEGIES_FANTASY5_FILE_ID: ${{ secrets.BEST_STRATEGIES_FANTASY5_FILE_ID }}
         GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
         GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-      run: |
-        # 驗證環境變數是否設置（不顯示敏感資訊）
-        if [ -z "$BEST_STRATEGIES_FANTASY5_FILE_ID" ]; then
-          echo "⚠️ 提示: BEST_STRATEGIES_FANTASY5_FILE_ID 未設置（將使用資料夾 ID）"
-        else
-          echo "✅ BEST_STRATEGIES_FANTASY5_FILE_ID 已設置"
-        fi
-        if [ -z "$GOOGLE_DRIVE_FOLDER_ID" ]; then
-          echo "⚠️ 警告: GOOGLE_DRIVE_FOLDER_ID 未設置"
-        else
-          echo "✅ GOOGLE_DRIVE_FOLDER_ID 已設置"
-        fi
-        if [ -z "$GOOGLE_CREDENTIALS" ]; then
-          echo "⚠️ 警告: GOOGLE_CREDENTIALS 未設置"
-        else
-          echo "✅ GOOGLE_CREDENTIALS 已設置"
-        fi
-        python auto_analyze_strategies.py --type fantasy5
+        BEST_STRATEGIES_FANTASY5_FILE_ID: ${{ secrets.BEST_STRATEGIES_FANTASY5_FILE_ID }}
+      run: python auto_analyze_strategies.py --type fantasy5
       
     # --- 上傳與歸檔 ---
     - name: ⬆️ Upload Fantasy 5 Prediction Log
@@ -109,6 +92,6 @@ jobs:
         path: |
           fantasy5_hist.xlsx
           fantasy5_prediction_log.xlsx
-          best_strategies_fantasy5.csv
+          best_strategies_fantasy5.xlsx
           *.log
         retention-days: 30
