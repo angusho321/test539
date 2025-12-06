@@ -21,12 +21,24 @@ OUTPUT_539 = 'best_strategies_539.xlsx'
 OUTPUT_FANTASY = 'best_strategies_fantasy5.xlsx'
 
 # 時間段定義 (對應 Python weekday: 0=週一 ... 6=週日)
-TIME_WINDOWS = {
+TIME_WINDOWS_539 = {
     "周一至周三": [0, 1, 2],  # 週一、週二、週三
     "周二至周四": [1, 2, 3],  # 週二、週三、週四
     "周三至周五": [2, 3, 4],  # 週三、週四、週五
     "周四至周六": [3, 4, 5]   # 週四、週五、週六
 }
+
+TIME_WINDOWS_FANTASY = {
+    "周一至周三": [0, 1, 2],  # 週一、週二、週三
+    "周二至周四": [1, 2, 3],  # 週二、週三、週四
+    "周三至周五": [2, 3, 4],  # 週三、週四、週五
+    "周四至周六": [3, 4, 5],  # 週四、週五、週六
+    "周五至周日": [4, 5, 6]   # 週五、週六、週日（僅天天樂）
+}
+
+def get_time_windows(is_fantasy=False):
+    """根據彩球類型返回對應的時間段"""
+    return TIME_WINDOWS_FANTASY if is_fantasy else TIME_WINDOWS_539
 
 # 使用近一年的紀錄
 RECENT_YEARS = 1
@@ -205,13 +217,16 @@ def format_combo_result(result):
 def generate_predictions(df, is_fantasy=False):
     """
     生成所有時間段的預測
-    返回: DataFrame，包含四個時間段的勝率前十名
+    返回: DataFrame，包含各時間段的勝率前十名
     """
     print(f"   🔍 開始計算各時間段勝率...")
     
+    # 根據彩球類型獲取對應的時間段
+    time_windows = get_time_windows(is_fantasy)
+    
     # 計算每個時間段的勝率前十名
     window_results = {}
-    for window_name, window_days in TIME_WINDOWS.items():
+    for window_name, window_days in time_windows.items():
         print(f"      -> 計算 {window_name}...")
         results = calculate_window_win_rate(df, window_name, window_days, is_fantasy)
         window_results[window_name] = results
@@ -220,16 +235,11 @@ def generate_predictions(df, is_fantasy=False):
     # 找出最長的結果列表（最多10個）
     max_len = max(len(results) for results in window_results.values()) if window_results else 0
     
-    # 創建輸出數據
-    output_data = {
-        "周一至周三": [],
-        "周二至周四": [],
-        "周三至周五": [],
-        "周四至周六": []
-    }
+    # 動態創建輸出數據（根據時間段）
+    output_data = {name: [] for name in time_windows.keys()}
     
     for i in range(max_len):
-        for window_name in TIME_WINDOWS.keys():
+        for window_name in time_windows.keys():
             if i < len(window_results[window_name]):
                 output_data[window_name].append(format_combo_result(window_results[window_name][i]))
             else:

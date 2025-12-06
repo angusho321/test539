@@ -2,8 +2,8 @@ name: 🎲 539 Lottery Automation
 
 on:
   schedule:
-    # 每週一上午 9:00 (台灣時間) - 執行策略分析
-    - cron: '0 1 * * 1'   # UTC 01:00 每週一 = 台灣時間週一 09:00
+    # 每天上午 9:00 (台灣時間) - 完整流程：記錄開獎+驗證昨日+預測今日
+    - cron: '0 1 * * *'   # UTC 01:00 = 台灣時間 09:00
   workflow_dispatch: {} # 允許手動觸發
 
 jobs:
@@ -77,13 +77,20 @@ jobs:
     - name: 📊 Generate today's predictions
       run: python lottery_prediction_only.py
     
-    # 步驟 4: 執行進階策略分析 (僅分析 539)
-    - name: 🧠 Run Advanced Strategy Analysis (539 only)
+    # 步驟 4: 執行進階策略分析 (僅分析 539，僅週一執行)
+    - name: 🧠 Run Advanced Strategy Analysis (539 only, Monday only)
       env:
         GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
         GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         BEST_STRATEGIES_539_FILE_ID: ${{ secrets.BEST_STRATEGIES_539_FILE_ID }}
-      run: python auto_analyze_strategies.py --type 539
+      run: |
+        DAY_OF_WEEK=$(date -u +%u)
+        if [ "$DAY_OF_WEEK" = "1" ]; then
+          echo "📅 今天是週一，執行進階策略分析..."
+          python auto_analyze_strategies.py --type 539
+        else
+          echo "⏭️ 今天不是週一，跳過進階策略分析"
+        fi
       
     - name: ⬆️ Upload all results to Google Drive
       env:
