@@ -31,7 +31,20 @@ jobs:
       run: |
         echo "$GOOGLE_CREDENTIALS" > credentials.json
         
-    # 步驟 1: 記錄昨天的開獎號碼
+    # 檢查是否為週日（539 週日不開獎）
+    - name: 📅 Check if Sunday (skip lottery on Sunday)
+      id: check_sunday
+      run: |
+        DAY_OF_WEEK=$(date -u +%u)
+        if [ "$DAY_OF_WEEK" = "7" ]; then
+          echo "is_sunday=true" >> $GITHUB_OUTPUT
+          echo "📅 今天是週日，539 不開獎，跳過預測流程"
+        else
+          echo "is_sunday=false" >> $GITHUB_OUTPUT
+          echo "📅 今天不是週日，執行正常流程"
+        fi
+    
+    # 步驟 1: 記錄昨天的開獎號碼（每天執行，包括週日）
     - name: ⬇️ Download existing lottery history
       env:
         LOTTERY_HIST_FILE_ID: ${{ secrets.LOTTERY_HIST_FILE_ID }}
@@ -64,17 +77,20 @@ jobs:
         LOTTERY_HIST_FILE_ID: ${{ secrets.LOTTERY_HIST_FILE_ID }}
       run: python scripts/upload_lottery_hist.py
       
-    # 步驟 2: 驗證昨日的預測
+    # 步驟 2: 驗證昨日的預測（週日跳過）
     - name: ⬇️ Download prediction log
+      if: steps.check_sunday.outputs.is_sunday != 'true'
       env:
         PREDICTION_LOG_FILE_ID: ${{ secrets.PREDICTION_LOG_FILE_ID }}
       run: python scripts/download_prediction_log.py
       
     - name: 🔍 Verify yesterday's predictions
+      if: steps.check_sunday.outputs.is_sunday != 'true'
       run: python verify_predictions.py
       
-    # 步驟 3: 預測今日的號碼
+    # 步驟 3: 預測今日的號碼（週日跳過）
     - name: 📊 Generate today's predictions
+      if: steps.check_sunday.outputs.is_sunday != 'true'
       run: python lottery_prediction_only.py
     
     # 步驟 4: 執行進階策略分析 (僅分析 539，僅週一執行)
@@ -96,7 +112,13 @@ jobs:
       env:
         PREDICTION_LOG_FILE_ID: ${{ secrets.PREDICTION_LOG_FILE_ID }}
         GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
-      run: python scripts/upload_to_drive.py
+      run: |
+        # 週日可能沒有預測記錄，但還是嘗試上傳（如果文件存在）
+        if [ -f "prediction_log.xlsx" ]; then
+          python scripts/upload_to_drive.py
+        else
+          echo "📅 週日無預測記錄，跳過上傳預測記錄"
+        fi
       
     - name: 📋 Archive daily results
       uses: actions/upload-artifact@v4
