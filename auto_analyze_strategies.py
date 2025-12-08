@@ -286,8 +286,11 @@ def upload_to_drive(local_file, file_id=None, folder_id=None, creds_json=None):
 
         # 如果本地文件是 CSV，轉換為 XLSX（因為 Google Drive 上的文件是 XLSX）
         upload_file = local_file
-        upload_mime_type = 'text/csv'
-        if local_file.endswith('.csv'):
+        # 根據文件擴展名設置正確的 MIME type
+        if local_file.endswith('.xlsx'):
+            upload_mime_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        elif local_file.endswith('.csv'):
+            upload_mime_type = 'text/csv'
             # 轉換 CSV 為 XLSX
             xlsx_file = local_file.replace('.csv', '.xlsx')
             try:
@@ -299,6 +302,9 @@ def upload_to_drive(local_file, file_id=None, folder_id=None, creds_json=None):
             except Exception as e:
                 print(f"⚠️ CSV 轉換為 XLSX 失敗，使用原始 CSV: {e}")
                 # 繼續使用 CSV
+        else:
+            # 其他文件類型，嘗試推斷 MIME type
+            upload_mime_type = 'application/octet-stream'
         
         # 如果目標文件是 XLSX，更新文件名
         if file_id:
