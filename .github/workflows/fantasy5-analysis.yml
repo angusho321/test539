@@ -56,6 +56,16 @@ jobs:
         FANTASY5_HIST_FILE_ID: ${{ secrets.FANTASY5_HIST_FILE_ID }}
       run: python scripts/upload_fantasy5_hist.py
       
+    # --- 週一冠軍策略分析 ---
+    - name: 🎯 Add Monday Strategy Analysis Sheet
+      run: python scripts/add_strategy_sheet.py --type fantasy5 --file fantasy5_hist.xlsx
+      
+    # 重新上傳包含策略分析的歷史檔案
+    - name: ⬆️ Re-upload Fantasy 5 history with strategy sheet
+      env:
+        FANTASY5_HIST_FILE_ID: ${{ secrets.FANTASY5_HIST_FILE_ID }}
+      run: python scripts/upload_fantasy5_hist.py
+      
     # --- 預測與驗證區 ---
     - name: ⬇️ Download Fantasy 5 prediction log
       env:
