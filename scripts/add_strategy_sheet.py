@@ -63,41 +63,37 @@ def calculate_number_with_offset(base_number, offset):
         result = result - 39
     return result
 
-def calculate_strategy_numbers(monday_record, lottery_type, offset_a, offset_b):
+def calculate_strategy_numbers(monday_record, ball_a_index, ball_b_index, offset_a, offset_b):
     """
     根據週一開獎記錄計算策略號碼
-    必須提供 offset_a 和 offset_b 參數
+    ball_a_index: 第一顆球的索引（1-5，對應號碼1-號碼5）
+    ball_b_index: 第二顆球的索引（1-5，對應號碼1-號碼5）
+    offset_a: 第一顆球的偏移量
+    offset_b: 第二顆球的偏移量
     """
     if offset_a is None or offset_b is None:
         raise ValueError("offset_a 和 offset_b 必須提供，不能為 None")
     
-    if lottery_type == '539':
-        num1 = int(monday_record['號碼1'])
-        num2 = int(monday_record['號碼2'])
-        
-        A = calculate_number_with_offset(num1, offset_a)
-        B = calculate_number_with_offset(num2, offset_b)
-        
-        return A, B
-    else:  # fantasy5
-        num1 = int(monday_record['號碼1'])
-        num4 = int(monday_record['號碼4'])
-        
-        A = calculate_number_with_offset(num1, offset_a)
-        # Fantasy5 的 B = 週一第4支 + Offset_B
-        # 當 offset_b = 0 時，相當於直接沿用第4支
-        B = calculate_number_with_offset(num4, offset_b)
-        
-        return A, B
+    # 取得對應的球號
+    num_a = int(monday_record[f'號碼{ball_a_index}'])
+    num_b = int(monday_record[f'號碼{ball_b_index}'])
+    
+    A = calculate_number_with_offset(num_a, offset_a)
+    B = calculate_number_with_offset(num_b, offset_b)
+    
+    return A, B
 
 def get_target_weekdays(lottery_type):
     """取得目標追號期（週二至週六）"""
     return [1, 2, 3, 4, 5]  # 週二至週六
 
-def backtest_strategy(df, monday_records, lottery_type, offset_a=None, offset_b=None, weeks=None):
+def backtest_strategy(df, monday_records, ball_a_index, ball_b_index, offset_a, offset_b, weeks=None):
     """
     回測策略近一年的勝率
-    如果提供了 offset_a 和 offset_b，則使用這些偏移量進行回測
+    ball_a_index: 第一顆球的索引（1-5）
+    ball_b_index: 第二顆球的索引（1-5）
+    offset_a: 第一顆球的偏移量
+    offset_b: 第二顆球的偏移量
     如果 weeks 為 None，則使用所有傳入的 monday_records
     """
     if monday_records.empty or len(monday_records) < 2:
@@ -111,11 +107,11 @@ def backtest_strategy(df, monday_records, lottery_type, offset_a=None, offset_b=
     
     wins = 0
     total = 0
-    target_weekdays = get_target_weekdays(lottery_type)
+    target_weekdays = get_target_weekdays('539')  # 539和Fantasy5都是週二至週六
     
     for idx, monday_row in recent_mondays.iterrows():
         monday_date = monday_row['日期']
-        A, B = calculate_strategy_numbers(monday_row, lottery_type, offset_a, offset_b)
+        A, B = calculate_strategy_numbers(monday_row, ball_a_index, ball_b_index, offset_a, offset_b)
         
         # 找出這個週一之後的週二至週六開獎記錄
         week_start = monday_date
@@ -152,12 +148,16 @@ def backtest_strategy(df, monday_records, lottery_type, offset_a=None, offset_b=
 def find_best_strategies(df, monday_records, lottery_type, weeks=52, min_win_rate=90.0):
     """
     動態分析過去一年的歷史數據，找出勝率超過指定閾值的最佳策略組合
+    測試所有可能的球號組合（第1-5支）和所有偏移量組合（0-38）
     返回前兩名最佳策略
     """
     if monday_records.empty or len(monday_records) < 2:
         return []
     
-    print(f"🔍 開始動態分析所有可能的策略組合（Offset 範圍: 0-38）...")
+    print(f"🔍 開始動態分析所有可能的策略組合...")
+    print(f"   球號組合: 第1-5支 × 第1-5支 = 25 種")
+    print(f"   偏移量組合: 0-38 × 0-38 = 1521 種")
+    print(f"   總組合數: 25 × 1521 = 38025 種")
     
     # 只取最近52週的週一記錄
     recent_mondays = monday_records.tail(weeks).copy()
@@ -165,34 +165,39 @@ def find_best_strategies(df, monday_records, lottery_type, weeks=52, min_win_rat
     if recent_mondays.empty:
         return []
     
-    # 嘗試所有可能的 Offset 組合（0-38）
+    # 嘗試所有可能的球號組合（1-5）和偏移量組合（0-38）
     all_strategies = []
-    total_combinations = 39 * 39  # 39 * 39 = 1521 種組合
+    total_combinations = 5 * 5 * 39 * 39  # 5×5×39×39 = 38025 種組合
     processed = 0
     
-    for offset_a in range(0, 39):
-        for offset_b in range(0, 39):
-            processed += 1
-            if processed % 100 == 0:
-                progress = (processed / total_combinations) * 100
-                print(f"   進度: {progress:.1f}% ({processed}/{total_combinations})", end='\r', flush=True)
-            
-            # 回測這個策略組合（使用所有 recent_mondays，因為已經過濾為最近52週）
-            win_rate, wins, total = backtest_strategy(
-                df, recent_mondays, lottery_type, 
-                offset_a=offset_a, offset_b=offset_b, 
-                weeks=None  # 使用所有傳入的 monday_records（已經過濾為最近52週）
-            )
-            
-            # 只保留勝率超過閾值的策略
-            if win_rate >= min_win_rate and total > 0:
-                all_strategies.append({
-                    'offset_a': offset_a,
-                    'offset_b': offset_b,
-                    'win_rate': win_rate,
-                    'wins': wins,
-                    'total': total
-                })
+    for ball_a_index in range(1, 6):  # 第1支到第5支
+        for ball_b_index in range(1, 6):  # 第1支到第5支
+            for offset_a in range(0, 39):
+                for offset_b in range(0, 39):
+                    processed += 1
+                    if processed % 1000 == 0:
+                        progress = (processed / total_combinations) * 100
+                        print(f"   進度: {progress:.1f}% ({processed}/{total_combinations})", end='\r', flush=True)
+                    
+                    # 回測這個策略組合
+                    win_rate, wins, total = backtest_strategy(
+                        df, recent_mondays, 
+                        ball_a_index, ball_b_index,
+                        offset_a, offset_b, 
+                        weeks=None  # 使用所有傳入的 monday_records（已經過濾為最近52週）
+                    )
+                    
+                    # 只保留勝率超過閾值的策略
+                    if win_rate >= min_win_rate and total > 0:
+                        all_strategies.append({
+                            'ball_a_index': ball_a_index,
+                            'ball_b_index': ball_b_index,
+                            'offset_a': offset_a,
+                            'offset_b': offset_b,
+                            'win_rate': win_rate,
+                            'wins': wins,
+                            'total': total
+                        })
     
     print(f"\n   完成！找到 {len(all_strategies)} 組勝率 >= {min_win_rate}% 的策略")
     
@@ -202,18 +207,18 @@ def find_best_strategies(df, monday_records, lottery_type, weeks=52, min_win_rat
     # 返回前兩名
     return all_strategies[:2]
 
-def check_current_week_status(df, latest_monday, lottery_type, offset_a, offset_b):
-    """檢查本週狀態（使用指定的 offset）"""
+def check_current_week_status(df, latest_monday, ball_a_index, ball_b_index, offset_a, offset_b):
+    """檢查本週狀態（使用指定的球號和 offset）"""
     if latest_monday is None:
         return "無資料", None, None
     
     monday_date = latest_monday['日期']
-    A, B = calculate_strategy_numbers(latest_monday, lottery_type, offset_a, offset_b)
+    A, B = calculate_strategy_numbers(latest_monday, ball_a_index, ball_b_index, offset_a, offset_b)
     
     # 找出本週的週二至週六開獎記錄
     week_start = monday_date
     week_end = monday_date + timedelta(days=6)
-    target_weekdays = get_target_weekdays(lottery_type)
+    target_weekdays = get_target_weekdays('539')  # 539和Fantasy5都是週二至週六
     
     week_records = df[
         (df['日期'] > week_start) & 
@@ -274,48 +279,26 @@ def add_strategy_sheet(file_path, lottery_type):
     # 動態分析找出最佳策略（勝率 > 90%）
     best_strategies = find_best_strategies(df, monday_records, lottery_type, weeks=52, min_win_rate=90.0)
     
-    # 準備最佳策略字串和號碼
+    # 準備最佳策略字串
     first_strategy_str = "無符合策略"
     second_strategy_str = "無符合策略"
-    A, B = None, None
-    C, D = None, None
-    first_win_rate = 0.0
-    second_win_rate = 0.0
+    
+    # 球號中文對應
+    ball_names = {1: '第一顆球', 2: '第二顆球', 3: '第三顆球', 4: '第四顆球', 5: '第五顆球'}
     
     if len(best_strategies) >= 1:
         s1 = best_strategies[0]
-        # 計算第一組的實際號碼
-        A, B = calculate_strategy_numbers(latest_monday, lottery_type, s1['offset_a'], s1['offset_b'])
-        first_win_rate = s1['win_rate']
-        first_strategy_str = f"{A} {B} {first_win_rate:.1f}%"
-        print(f"🏆 第一組最佳策略: 號碼A={A}, 號碼B={B}, 勝率={first_win_rate:.1f}% (中獎: {s1['wins']}/{s1['total']})")
+        ball_a_name = ball_names[s1['ball_a_index']]
+        ball_b_name = ball_names[s1['ball_b_index']]
+        first_strategy_str = f"{ball_a_name}+{s1['offset_a']} {ball_b_name}+{s1['offset_b']} 勝率{s1['win_rate']:.0f}%"
+        print(f"🏆 第一組最佳策略: {ball_a_name}+{s1['offset_a']} {ball_b_name}+{s1['offset_b']}, 勝率={s1['win_rate']:.1f}% (中獎: {s1['wins']}/{s1['total']})")
     
     if len(best_strategies) >= 2:
         s2 = best_strategies[1]
-        # 計算第二組的實際號碼
-        C, D = calculate_strategy_numbers(latest_monday, lottery_type, s2['offset_a'], s2['offset_b'])
-        second_win_rate = s2['win_rate']
-        second_strategy_str = f"{C} {D} {second_win_rate:.1f}%"
-        print(f"🥈 第二組最佳策略: 號碼C={C}, 號碼D={D}, 勝率={second_win_rate:.1f}% (中獎: {s2['wins']}/{s2['total']})")
-    
-    # 使用第一組最佳策略計算本週預測號碼（如果有）
-    if len(best_strategies) >= 1:
-        best_offset_a = best_strategies[0]['offset_a']
-        best_offset_b = best_strategies[0]['offset_b']
-        print(f"🎯 本週預測號碼（使用第一組策略）: A={A}, B={B}")
-        
-        # 檢查本週狀態（使用第一組最佳策略）
-        status, win_date, win_record = check_current_week_status(
-            df, latest_monday, lottery_type, best_offset_a, best_offset_b
-        )
-        win_rate, wins, total = first_win_rate, best_strategies[0]['wins'], best_strategies[0]['total']
-    else:
-        # 如果沒有找到最佳策略，無法計算預測號碼
-        print("⚠️ 未找到勝率 >= 90% 的策略，無法計算本週預測號碼")
-        win_rate, wins, total = 0.0, 0, 0
-        status, win_date, win_record = "無符合策略", None, None
-    
-    print(f"📋 本週狀態: {status}")
+        ball_a_name = ball_names[s2['ball_a_index']]
+        ball_b_name = ball_names[s2['ball_b_index']]
+        second_strategy_str = f"{ball_a_name}+{s2['offset_a']} {ball_b_name}+{s2['offset_b']} 勝率{s2['win_rate']:.0f}%"
+        print(f"🥈 第二組最佳策略: {ball_a_name}+{s2['offset_a']} {ball_b_name}+{s2['offset_b']}, 勝率={s2['win_rate']:.1f}% (中獎: {s2['wins']}/{s2['total']})")
     
     # 準備寫入 Excel 的資料
     strategy_data = {
