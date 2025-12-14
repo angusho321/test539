@@ -247,8 +247,34 @@ def find_best_strategies(df, monday_records, lottery_type, weeks=52, min_win_rat
     # 排序：先按勝率降序，再按中獎次數降序
     all_strategies.sort(key=lambda x: (-x['win_rate'], -x['wins']))
     
-    # 返回前兩名
-    return all_strategies[:2]
+    # 去除重複的策略組合（不考慮順序）
+    # 例如：(第一顆球+6, 第二顆球+12) 和 (第二顆球+12, 第一顆球+6) 視為相同
+    seen_strategies = set()
+    unique_strategies = []
+    
+    for strategy in all_strategies:
+        # 建立策略的唯一標識（標準化：較小的球號在前，如果球號相同則較小的偏移量在前）
+        ball_a = strategy['ball_a_index']
+        ball_b = strategy['ball_b_index']
+        offset_a = strategy['offset_a']
+        offset_b = strategy['offset_b']
+        
+        # 標準化：確保 (ball_a, offset_a) <= (ball_b, offset_b)
+        if (ball_a, offset_a) > (ball_b, offset_b):
+            # 交換順序
+            strategy_key = ((ball_b, offset_b), (ball_a, offset_a))
+        else:
+            strategy_key = ((ball_a, offset_a), (ball_b, offset_b))
+        
+        # 如果這個策略組合還沒見過，加入結果
+        if strategy_key not in seen_strategies:
+            seen_strategies.add(strategy_key)
+            unique_strategies.append(strategy)
+    
+    print(f"   去除重複後，剩餘 {len(unique_strategies)} 組唯一策略")
+    
+    # 返回前兩名（已去重）
+    return unique_strategies[:2]
 
 def check_current_week_status(df, latest_monday, ball_a_index, ball_b_index, offset_a, offset_b):
     """檢查本週狀態（使用指定的球號和 offset）"""
