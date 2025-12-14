@@ -379,8 +379,11 @@ def add_strategy_sheet(file_path, lottery_type):
         ball_b_name = ball_names[s1['ball_b_index']]
         missed_weeks_str = format_missed_weeks(s1.get('missed_weeks', []))
         first_strategy_str = f"{ball_a_name}+{s1['offset_a']} {ball_b_name}+{s1['offset_b']} 勝率{s1['win_rate']:.0f}%"
+        first_missed_str = missed_weeks_str
         print(f"🏆 第一組最佳策略: {ball_a_name}+{s1['offset_a']} {ball_b_name}+{s1['offset_b']}, 勝率={s1['win_rate']:.1f}% (中獎: {s1['wins']}/{s1['total']})")
         print(f"   槓龜週: {missed_weeks_str}")
+    else:
+        first_missed_str = "無符合策略"
     
     if len(best_strategies) >= 2:
         s2 = best_strategies[1]
@@ -388,12 +391,18 @@ def add_strategy_sheet(file_path, lottery_type):
         ball_b_name = ball_names[s2['ball_b_index']]
         missed_weeks_str = format_missed_weeks(s2.get('missed_weeks', []))
         second_strategy_str = f"{ball_a_name}+{s2['offset_a']} {ball_b_name}+{s2['offset_b']} 勝率{s2['win_rate']:.0f}%"
+        second_missed_str = missed_weeks_str
         print(f"🥈 第二組最佳策略: {ball_a_name}+{s2['offset_a']} {ball_b_name}+{s2['offset_b']}, 勝率={s2['win_rate']:.1f}% (中獎: {s2['wins']}/{s2['total']})")
         print(f"   槓龜週: {missed_weeks_str}")
+    else:
+        second_missed_str = "無符合策略"
     
     third_strategy_str = "無符合策略"
+    third_missed_str = "無符合策略"
     fourth_strategy_str = "無符合策略"
+    fourth_missed_str = "無符合策略"
     fifth_strategy_str = "無符合策略"
+    fifth_missed_str = "無符合策略"
     
     if len(best_strategies) >= 3:
         s3 = best_strategies[2]
@@ -401,6 +410,7 @@ def add_strategy_sheet(file_path, lottery_type):
         ball_b_name = ball_names[s3['ball_b_index']]
         missed_weeks_str = format_missed_weeks(s3.get('missed_weeks', []))
         third_strategy_str = f"{ball_a_name}+{s3['offset_a']} {ball_b_name}+{s3['offset_b']} 勝率{s3['win_rate']:.0f}%"
+        third_missed_str = missed_weeks_str
         print(f"🥉 第三組最佳策略: {ball_a_name}+{s3['offset_a']} {ball_b_name}+{s3['offset_b']}, 勝率={s3['win_rate']:.1f}% (中獎: {s3['wins']}/{s3['total']})")
         print(f"   槓龜週: {missed_weeks_str}")
     
@@ -410,6 +420,7 @@ def add_strategy_sheet(file_path, lottery_type):
         ball_b_name = ball_names[s4['ball_b_index']]
         missed_weeks_str = format_missed_weeks(s4.get('missed_weeks', []))
         fourth_strategy_str = f"{ball_a_name}+{s4['offset_a']} {ball_b_name}+{s4['offset_b']} 勝率{s4['win_rate']:.0f}%"
+        fourth_missed_str = missed_weeks_str
         print(f"🏅 第四組最佳策略: {ball_a_name}+{s4['offset_a']} {ball_b_name}+{s4['offset_b']}, 勝率={s4['win_rate']:.1f}% (中獎: {s4['wins']}/{s4['total']})")
         print(f"   槓龜週: {missed_weeks_str}")
     
@@ -419,6 +430,7 @@ def add_strategy_sheet(file_path, lottery_type):
         ball_b_name = ball_names[s5['ball_b_index']]
         missed_weeks_str = format_missed_weeks(s5.get('missed_weeks', []))
         fifth_strategy_str = f"{ball_a_name}+{s5['offset_a']} {ball_b_name}+{s5['offset_b']} 勝率{s5['win_rate']:.0f}%"
+        fifth_missed_str = missed_weeks_str
         print(f"🏅 第五組最佳策略: {ball_a_name}+{s5['offset_a']} {ball_b_name}+{s5['offset_b']}, 勝率={s5['win_rate']:.1f}% (中獎: {s5['wins']}/{s5['total']})")
         print(f"   槓龜週: {missed_weeks_str}")
     
@@ -426,17 +438,27 @@ def add_strategy_sheet(file_path, lottery_type):
     strategy_data = {
         '項目': [
             '第一組',
+            '第一組槓龜週',
             '第二組',
+            '第二組槓龜週',
             '第三組',
+            '第三組槓龜週',
             '第四組',
-            '第五組'
+            '第四組槓龜週',
+            '第五組',
+            '第五組槓龜週'
         ],
         '內容': [
             first_strategy_str,
+            first_missed_str,
             second_strategy_str,
+            second_missed_str,
             third_strategy_str,
+            third_missed_str,
             fourth_strategy_str,
-            fifth_strategy_str
+            fourth_missed_str,
+            fifth_strategy_str,
+            fifth_missed_str
         ]
     }
     
