@@ -87,33 +87,33 @@ def get_target_weekdays(lottery_type):
     """取得目標追號期（週二至週六）"""
     return [1, 2, 3, 4, 5]  # 週二至週六
 
-def backtest_strategy(df, monday_records, ball_a_index, ball_b_index, offset_a, offset_b, weeks=None):
+def preprocess_weekly_data(df, monday_records, weeks=52):
     """
-    回測策略近一年的勝率
-    ball_a_index: 第一顆球的索引（1-5）
-    ball_b_index: 第二顆球的索引（1-5）
-    offset_a: 第一顆球的偏移量
-    offset_b: 第二顆球的偏移量
-    如果 weeks 為 None，則使用所有傳入的 monday_records
+    預先處理資料，建立每週的資料結構
+    返回: List[Dict]，每個元素包含該週一的5顆球號碼和該週二至週六所有開出的號碼 Set
     """
-    if monday_records.empty or len(monday_records) < 2:
-        return 0.0, 0, 0
+    # 只取最近 N 週的週一記錄
+    recent_mondays = monday_records.tail(weeks).copy()
     
-    # 如果指定了 weeks，則只取最近 N 週的週一記錄；否則使用全部
-    if weeks is not None:
-        recent_mondays = monday_records.tail(weeks).copy()
-    else:
-        recent_mondays = monday_records.copy()
+    if recent_mondays.empty:
+        return []
     
-    wins = 0
-    total = 0
     target_weekdays = get_target_weekdays('539')  # 539和Fantasy5都是週二至週六
+    weekly_data = []
     
     for idx, monday_row in recent_mondays.iterrows():
         monday_date = monday_row['日期']
-        A, B = calculate_strategy_numbers(monday_row, ball_a_index, ball_b_index, offset_a, offset_b)
         
-        # 找出這個週一之後的週二至週六開獎記錄
+        # 取得該週一的5顆球號碼
+        monday_nums = [
+            int(monday_row['號碼1']),
+            int(monday_row['號碼2']),
+            int(monday_row['號碼3']),
+            int(monday_row['號碼4']),
+            int(monday_row['號碼5'])
+        ]
+        
+        # 找出這個週一之後的週二至週六開獎記錄（只查詢一次）
         week_start = monday_date
         week_end = monday_date + timedelta(days=6)
         
@@ -123,24 +123,61 @@ def backtest_strategy(df, monday_records, ball_a_index, ball_b_index, offset_a, 
             (df['日期'].dt.weekday.isin(target_weekdays))
         ].copy()
         
-        if week_records.empty:
+        # 建立該週所有開出號碼的 Set（用於快速查找）
+        winning_set = set()
+        if not week_records.empty:
+            for _, record in week_records.iterrows():
+                winning_set.update([
+                    int(record['號碼1']),
+                    int(record['號碼2']),
+                    int(record['號碼3']),
+                    int(record['號碼4']),
+                    int(record['號碼5'])
+                ])
+        
+        weekly_data.append({
+            'monday_nums': monday_nums,
+            'winning_set': winning_set,
+            'has_data': len(winning_set) > 0  # 標記是否有開獎資料
+        })
+    
+    return weekly_data
+
+def backtest_strategy_optimized(weekly_data, ball_a_index, ball_b_index, offset_a, offset_b):
+    """
+    優化版回測策略：使用預處理的資料進行純記憶體比對
+    weekly_data: 預處理的每週資料（來自 preprocess_weekly_data）
+    ball_a_index: 第一顆球的索引（1-5）
+    ball_b_index: 第二顆球的索引（1-5）
+    offset_a: 第一顆球的偏移量
+    offset_b: 第二顆球的偏移量
+    """
+    if not weekly_data:
+        return 0.0, 0, 0
+    
+    wins = 0
+    total = 0
+    
+    for week_info in weekly_data:
+        # 跳過沒有開獎資料的週
+        if not week_info['has_data']:
             continue
+        
+        monday_nums = week_info['monday_nums']
+        winning_set = week_info['winning_set']
+        
+        # 計算策略號碼（純記憶體運算）
+        num_a = monday_nums[ball_a_index - 1]  # 轉換為 0-based 索引
+        num_b = monday_nums[ball_b_index - 1]
+        
+        A = calculate_number_with_offset(num_a, offset_a)
+        B = calculate_number_with_offset(num_b, offset_b)
         
         total += 1
         
-        # 檢查是否中獎（A 或 B 出現在任何一天的開獎號碼中）
-        for _, record in week_records.iterrows():
-            drawn_numbers = [
-                int(record['號碼1']),
-                int(record['號碼2']),
-                int(record['號碼3']),
-                int(record['號碼4']),
-                int(record['號碼5'])
-            ]
-            
-            if A in drawn_numbers or B in drawn_numbers:
-                wins += 1
-                break  # 只要有一期中獎就算這週中獎
+        # 檢查是否中獎（使用 Set 的快速查找，O(1) 時間複雜度）
+        if A in winning_set or B in winning_set:
+            wins += 1
     
     win_rate = (wins / total * 100) if total > 0 else 0.0
     return win_rate, wins, total
@@ -150,6 +187,8 @@ def find_best_strategies(df, monday_records, lottery_type, weeks=52, min_win_rat
     動態分析過去一年的歷史數據，找出勝率超過指定閾值的最佳策略組合
     測試所有可能的球號組合（第1-5支）和所有偏移量組合（0-38）
     返回前兩名最佳策略
+    
+    優化：使用預先計算的資料結構，避免在迴圈內查詢 DataFrame
     """
     if monday_records.empty or len(monday_records) < 2:
         return []
@@ -159,32 +198,36 @@ def find_best_strategies(df, monday_records, lottery_type, weeks=52, min_win_rat
     print(f"   偏移量組合: 0-38 × 0-38 = 1521 種")
     print(f"   總組合數: 25 × 1521 = 38025 種")
     
-    # 只取最近52週的週一記錄
-    recent_mondays = monday_records.tail(weeks).copy()
+    # Step 1: 預先處理資料（只執行一次）
+    print(f"   📊 預先處理資料中...")
+    weekly_data = preprocess_weekly_data(df, monday_records, weeks)
     
-    if recent_mondays.empty:
+    if not weekly_data:
         return []
     
-    # 嘗試所有可能的球號組合（1-5）和偏移量組合（0-38）
+    print(f"   ✅ 資料預處理完成，共 {len(weekly_data)} 週資料")
+    
+    # Step 2: 嘗試所有可能的球號組合（1-5）和偏移量組合（0-38）
     all_strategies = []
     total_combinations = 5 * 5 * 39 * 39  # 5×5×39×39 = 38025 種組合
     processed = 0
+    
+    print(f"   🚀 開始回測（純記憶體比對模式）...")
     
     for ball_a_index in range(1, 6):  # 第1支到第5支
         for ball_b_index in range(1, 6):  # 第1支到第5支
             for offset_a in range(0, 39):
                 for offset_b in range(0, 39):
                     processed += 1
-                    if processed % 1000 == 0:
+                    if processed % 5000 == 0:
                         progress = (processed / total_combinations) * 100
                         print(f"   進度: {progress:.1f}% ({processed}/{total_combinations})", end='\r', flush=True)
                     
-                    # 回測這個策略組合
-                    win_rate, wins, total = backtest_strategy(
-                        df, recent_mondays, 
+                    # 回測這個策略組合（使用優化版函數，純記憶體比對）
+                    win_rate, wins, total = backtest_strategy_optimized(
+                        weekly_data,
                         ball_a_index, ball_b_index,
-                        offset_a, offset_b, 
-                        weeks=None  # 使用所有傳入的 monday_records（已經過濾為最近52週）
+                        offset_a, offset_b
                     )
                     
                     # 只保留勝率超過閾值的策略
