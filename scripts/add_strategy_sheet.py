@@ -133,12 +133,16 @@ def preprocess_weekly_data(df, monday_records, lottery_type, weeks=52):
             monday_date_only = monday_date
         
         week_start = pd.Timestamp(monday_date_only) + timedelta(days=1)  # 週二 00:00:00
-        week_end = pd.Timestamp(monday_date_only) + timedelta(days=6)  # 週日 00:00:00
+        # 根據彩種決定結束日期
+        if lottery_type == 'fantasy5':
+            week_end = pd.Timestamp(monday_date_only) + timedelta(days=6)  # 週日 00:00:00
+        else:
+            week_end = pd.Timestamp(monday_date_only) + timedelta(days=5)  # 週六 00:00:00 (539)
         
-        # 過濾：日期在週二至週日之間，且 weekday 符合目標範圍
+        # 過濾：日期在週二至目標結束日期之間，且 weekday 符合目標範圍
         week_records = df[
             (df['日期'] >= week_start) & 
-            (df['日期'] <= week_end) &  # 包含週日當天
+            (df['日期'] <= week_end) &
             (df['日期'].dt.weekday.isin(target_weekdays))
         ].copy()
         
@@ -353,12 +357,16 @@ def check_current_week_status(df, latest_monday, ball_a_index, ball_b_index, off
         monday_date_only = monday_date
     
     week_start = pd.Timestamp(monday_date_only) + timedelta(days=1)  # 週二 00:00:00
-    week_end = pd.Timestamp(monday_date_only) + timedelta(days=6)  # 週日 00:00:00
+    # 根據彩種決定結束日期
+    if lottery_type == 'fantasy5':
+        week_end = pd.Timestamp(monday_date_only) + timedelta(days=6)  # 週日 00:00:00
+    else:
+        week_end = pd.Timestamp(monday_date_only) + timedelta(days=5)  # 週六 00:00:00 (539)
     target_weekdays = get_target_weekdays(lottery_type)  # 根據彩種決定範圍
     
     week_records = df[
         (df['日期'] >= week_start) & 
-        (df['日期'] <= week_end) &  # 包含週日當天
+        (df['日期'] <= week_end) &
         (df['日期'].dt.weekday.isin(target_weekdays))
     ].copy()
     
