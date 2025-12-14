@@ -136,6 +136,7 @@ def preprocess_weekly_data(df, monday_records, weeks=52):
                 ])
         
         weekly_data.append({
+            'monday_date': monday_date,  # 保存週一日期，用於顯示
             'monday_nums': monday_nums,
             'winning_set': winning_set,
             'has_data': len(winning_set) > 0  # 標記是否有開獎資料
@@ -151,12 +152,16 @@ def backtest_strategy_optimized(weekly_data, ball_a_index, ball_b_index, offset_
     ball_b_index: 第二顆球的索引（1-5）
     offset_a: 第一顆球的偏移量
     offset_b: 第二顆球的偏移量
+    
+    返回: (win_rate, wins, total, missed_weeks)
+    missed_weeks: 未中獎的週一日期列表
     """
     if not weekly_data:
-        return 0.0, 0, 0
+        return 0.0, 0, 0, []
     
     wins = 0
     total = 0
+    missed_weeks = []  # 記錄未中獎的週
     
     for week_info in weekly_data:
         # 跳過沒有開獎資料的週
@@ -165,6 +170,7 @@ def backtest_strategy_optimized(weekly_data, ball_a_index, ball_b_index, offset_
         
         monday_nums = week_info['monday_nums']
         winning_set = week_info['winning_set']
+        monday_date = week_info['monday_date']
         
         # 計算策略號碼（純記憶體運算）
         num_a = monday_nums[ball_a_index - 1]  # 轉換為 0-based 索引
@@ -178,9 +184,12 @@ def backtest_strategy_optimized(weekly_data, ball_a_index, ball_b_index, offset_
         # 檢查是否中獎（使用 Set 的快速查找，O(1) 時間複雜度）
         if A in winning_set or B in winning_set:
             wins += 1
+        else:
+            # 記錄未中獎的週
+            missed_weeks.append(monday_date)
     
     win_rate = (wins / total * 100) if total > 0 else 0.0
-    return win_rate, wins, total
+    return win_rate, wins, total, missed_weeks
 
 def find_best_strategies(df, monday_records, lottery_type, weeks=52, min_win_rate=90.0):
     """
@@ -224,7 +233,7 @@ def find_best_strategies(df, monday_records, lottery_type, weeks=52, min_win_rat
                         print(f"   進度: {progress:.1f}% ({processed}/{total_combinations})", end='\r', flush=True)
                     
                     # 回測這個策略組合（使用優化版函數，純記憶體比對）
-                    win_rate, wins, total = backtest_strategy_optimized(
+                    win_rate, wins, total, missed_weeks = backtest_strategy_optimized(
                         weekly_data,
                         ball_a_index, ball_b_index,
                         offset_a, offset_b
@@ -239,7 +248,8 @@ def find_best_strategies(df, monday_records, lottery_type, weeks=52, min_win_rat
                             'offset_b': offset_b,
                             'win_rate': win_rate,
                             'wins': wins,
-                            'total': total
+                            'total': total,
+                            'missed_weeks': missed_weeks  # 記錄未中獎的週
                         })
     
     print(f"\n   完成！找到 {len(all_strategies)} 組勝率 >= {min_win_rate}% 的策略")
@@ -273,8 +283,8 @@ def find_best_strategies(df, monday_records, lottery_type, weeks=52, min_win_rat
     
     print(f"   去除重複後，剩餘 {len(unique_strategies)} 組唯一策略")
     
-    # 返回前兩名（已去重）
-    return unique_strategies[:2]
+    # 返回前五名（已去重）
+    return unique_strategies[:5]
 
 def check_current_week_status(df, latest_monday, ball_a_index, ball_b_index, offset_a, offset_b):
     """檢查本週狀態（使用指定的球號和 offset）"""
@@ -355,29 +365,78 @@ def add_strategy_sheet(file_path, lottery_type):
     # 球號中文對應
     ball_names = {1: '第一顆球', 2: '第二顆球', 3: '第三顆球', 4: '第四顆球', 5: '第五顆球'}
     
+    def format_missed_weeks(missed_weeks):
+        """格式化未中獎的週列表"""
+        if not missed_weeks:
+            return "無"
+        # 格式化日期為 YYYY-MM-DD
+        dates_str = ", ".join([date.strftime('%Y-%m-%d') for date in missed_weeks])
+        return dates_str
+    
     if len(best_strategies) >= 1:
         s1 = best_strategies[0]
         ball_a_name = ball_names[s1['ball_a_index']]
         ball_b_name = ball_names[s1['ball_b_index']]
+        missed_weeks_str = format_missed_weeks(s1.get('missed_weeks', []))
         first_strategy_str = f"{ball_a_name}+{s1['offset_a']} {ball_b_name}+{s1['offset_b']} 勝率{s1['win_rate']:.0f}%"
         print(f"🏆 第一組最佳策略: {ball_a_name}+{s1['offset_a']} {ball_b_name}+{s1['offset_b']}, 勝率={s1['win_rate']:.1f}% (中獎: {s1['wins']}/{s1['total']})")
+        print(f"   槓龜週: {missed_weeks_str}")
     
     if len(best_strategies) >= 2:
         s2 = best_strategies[1]
         ball_a_name = ball_names[s2['ball_a_index']]
         ball_b_name = ball_names[s2['ball_b_index']]
+        missed_weeks_str = format_missed_weeks(s2.get('missed_weeks', []))
         second_strategy_str = f"{ball_a_name}+{s2['offset_a']} {ball_b_name}+{s2['offset_b']} 勝率{s2['win_rate']:.0f}%"
         print(f"🥈 第二組最佳策略: {ball_a_name}+{s2['offset_a']} {ball_b_name}+{s2['offset_b']}, 勝率={s2['win_rate']:.1f}% (中獎: {s2['wins']}/{s2['total']})")
+        print(f"   槓龜週: {missed_weeks_str}")
+    
+    third_strategy_str = "無符合策略"
+    fourth_strategy_str = "無符合策略"
+    fifth_strategy_str = "無符合策略"
+    
+    if len(best_strategies) >= 3:
+        s3 = best_strategies[2]
+        ball_a_name = ball_names[s3['ball_a_index']]
+        ball_b_name = ball_names[s3['ball_b_index']]
+        missed_weeks_str = format_missed_weeks(s3.get('missed_weeks', []))
+        third_strategy_str = f"{ball_a_name}+{s3['offset_a']} {ball_b_name}+{s3['offset_b']} 勝率{s3['win_rate']:.0f}%"
+        print(f"🥉 第三組最佳策略: {ball_a_name}+{s3['offset_a']} {ball_b_name}+{s3['offset_b']}, 勝率={s3['win_rate']:.1f}% (中獎: {s3['wins']}/{s3['total']})")
+        print(f"   槓龜週: {missed_weeks_str}")
+    
+    if len(best_strategies) >= 4:
+        s4 = best_strategies[3]
+        ball_a_name = ball_names[s4['ball_a_index']]
+        ball_b_name = ball_names[s4['ball_b_index']]
+        missed_weeks_str = format_missed_weeks(s4.get('missed_weeks', []))
+        fourth_strategy_str = f"{ball_a_name}+{s4['offset_a']} {ball_b_name}+{s4['offset_b']} 勝率{s4['win_rate']:.0f}%"
+        print(f"🏅 第四組最佳策略: {ball_a_name}+{s4['offset_a']} {ball_b_name}+{s4['offset_b']}, 勝率={s4['win_rate']:.1f}% (中獎: {s4['wins']}/{s4['total']})")
+        print(f"   槓龜週: {missed_weeks_str}")
+    
+    if len(best_strategies) >= 5:
+        s5 = best_strategies[4]
+        ball_a_name = ball_names[s5['ball_a_index']]
+        ball_b_name = ball_names[s5['ball_b_index']]
+        missed_weeks_str = format_missed_weeks(s5.get('missed_weeks', []))
+        fifth_strategy_str = f"{ball_a_name}+{s5['offset_a']} {ball_b_name}+{s5['offset_b']} 勝率{s5['win_rate']:.0f}%"
+        print(f"🏅 第五組最佳策略: {ball_a_name}+{s5['offset_a']} {ball_b_name}+{s5['offset_b']}, 勝率={s5['win_rate']:.1f}% (中獎: {s5['wins']}/{s5['total']})")
+        print(f"   槓龜週: {missed_weeks_str}")
     
     # 準備寫入 Excel 的資料
     strategy_data = {
         '項目': [
             '第一組',
-            '第二組'
+            '第二組',
+            '第三組',
+            '第四組',
+            '第五組'
         ],
         '內容': [
             first_strategy_str,
-            second_strategy_str
+            second_strategy_str,
+            third_strategy_str,
+            fourth_strategy_str,
+            fifth_strategy_str
         ]
     }
     
