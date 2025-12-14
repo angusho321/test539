@@ -84,13 +84,21 @@ def calculate_strategy_numbers(monday_record, ball_a_index, ball_b_index, offset
     return A, B
 
 def get_target_weekdays(lottery_type):
-    """取得目標追號期（週二至週六）"""
-    return [1, 2, 3, 4, 5]  # 週二至週六
+    """取得目標追號期
+    - 539: 週二至週六 (1, 2, 3, 4, 5)
+    - Fantasy5: 週二至週日 (1, 2, 3, 4, 5, 6) - 因為天天樂週一到週日都有開獎
+    """
+    if lottery_type == 'fantasy5':
+        return [1, 2, 3, 4, 5, 6]  # 週二至週日
+    else:
+        return [1, 2, 3, 4, 5]  # 週二至週六
 
-def preprocess_weekly_data(df, monday_records, weeks=52):
+def preprocess_weekly_data(df, monday_records, lottery_type, weeks=52):
     """
     預先處理資料，建立每週的資料結構
-    返回: List[Dict]，每個元素包含該週一的5顆球號碼和該週二至週六所有開出的號碼 Set
+    返回: List[Dict]，每個元素包含該週一的5顆球號碼和該週目標日期所有開出的號碼 Set
+    - Fantasy5: 週二至週日
+    - 539: 週二至週六
     """
     # 只取最近 N 週的週一記錄
     recent_mondays = monday_records.tail(weeks).copy()
@@ -98,7 +106,7 @@ def preprocess_weekly_data(df, monday_records, weeks=52):
     if recent_mondays.empty:
         return []
     
-    target_weekdays = get_target_weekdays('539')  # 539和Fantasy5都是週二至週六
+    target_weekdays = get_target_weekdays(lottery_type)  # 根據彩種決定範圍
     weekly_data = []
     
     for idx, monday_row in recent_mondays.iterrows():
@@ -113,13 +121,24 @@ def preprocess_weekly_data(df, monday_records, weeks=52):
             int(monday_row['號碼5'])
         ]
         
-        # 找出這個週一之後的週二至週六開獎記錄（只查詢一次）
-        week_start = monday_date
-        week_end = monday_date + timedelta(days=6)
+        # 找出這個週一之後的目標日期開獎記錄（只查詢一次）
+        # Fantasy5: 週二至週日
+        # 539: 週二至週六
+        # 使用日期（不含時間）來比較，避免時間戳記造成的問題
+        if hasattr(monday_date, 'date'):
+            monday_date_only = monday_date.date()
+        elif isinstance(monday_date, pd.Timestamp):
+            monday_date_only = monday_date.date()
+        else:
+            monday_date_only = monday_date
         
+        week_start = pd.Timestamp(monday_date_only) + timedelta(days=1)  # 週二 00:00:00
+        week_end = pd.Timestamp(monday_date_only) + timedelta(days=6)  # 週日 00:00:00
+        
+        # 過濾：日期在週二至週日之間，且 weekday 符合目標範圍
         week_records = df[
-            (df['日期'] > week_start) & 
-            (df['日期'] <= week_end) &
+            (df['日期'] >= week_start) & 
+            (df['日期'] <= week_end) &  # 包含週日當天
             (df['日期'].dt.weekday.isin(target_weekdays))
         ].copy()
         
@@ -140,7 +159,7 @@ def preprocess_weekly_data(df, monday_records, weeks=52):
                     int(record['號碼5'])
                 ]
                 winning_set.update(drawn_numbers)
-                # 儲存每一天的記錄（weekday: 1=週二, 2=週三, ..., 5=週六）
+                # 儲存每一天的記錄（weekday: 1=週二, 2=週三, ..., 5=週六, 6=週日）
                 weekday = record['日期'].weekday()
                 daily_records.append((weekday, drawn_numbers))
         
@@ -168,12 +187,18 @@ def backtest_strategy_optimized(weekly_data, ball_a_index, ball_b_index, offset_
     day_stats: 字典，記錄每一天的中獎次數 {1: count, 2: count, ...} (1=週二, 2=週三, ...)
     """
     if not weekly_data:
+        # 如果沒有資料，預設返回不包含週日的格式（539）
         return 0.0, 0, 0, [], {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
     
     wins = 0
     total = 0
     missed_weeks = []  # 記錄未中獎的週
-    day_stats = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}  # 1=週二, 2=週三, 3=週四, 4=週五, 5=週六
+    # 根據 weekly_data 的第一筆記錄判斷是否包含週日
+    has_sunday = len(weekly_data) > 0 and any(6 in [r[0] for r in week_info.get('daily_records', [])] for week_info in weekly_data)
+    if has_sunday:
+        day_stats = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0}  # 1=週二, 2=週三, 3=週四, 4=週五, 5=週六, 6=週日
+    else:
+        day_stats = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}  # 1=週二, 2=週三, 3=週四, 4=週五, 5=週六
     
     for week_info in weekly_data:
         # 跳過沒有開獎資料的週
@@ -230,7 +255,7 @@ def find_best_strategies(df, monday_records, lottery_type, weeks=52, min_win_rat
     
     # Step 1: 預先處理資料（只執行一次）
     print(f"   📊 預先處理資料中...")
-    weekly_data = preprocess_weekly_data(df, monday_records, weeks)
+    weekly_data = preprocess_weekly_data(df, monday_records, lottery_type, weeks)
     
     if not weekly_data:
         return []
@@ -308,7 +333,7 @@ def find_best_strategies(df, monday_records, lottery_type, weeks=52, min_win_rat
     # 返回前五名（已去重）
     return unique_strategies[:5]
 
-def check_current_week_status(df, latest_monday, ball_a_index, ball_b_index, offset_a, offset_b):
+def check_current_week_status(df, latest_monday, ball_a_index, ball_b_index, offset_a, offset_b, lottery_type):
     """檢查本週狀態（使用指定的球號和 offset）"""
     if latest_monday is None:
         return "無資料", None, None
@@ -316,14 +341,24 @@ def check_current_week_status(df, latest_monday, ball_a_index, ball_b_index, off
     monday_date = latest_monday['日期']
     A, B = calculate_strategy_numbers(latest_monday, ball_a_index, ball_b_index, offset_a, offset_b)
     
-    # 找出本週的週二至週六開獎記錄
-    week_start = monday_date
-    week_end = monday_date + timedelta(days=6)
-    target_weekdays = get_target_weekdays('539')  # 539和Fantasy5都是週二至週六
+    # 找出本週的目標日期開獎記錄
+    # Fantasy5: 週二至週日
+    # 539: 週二至週六
+    # 使用日期（不含時間）來比較，避免時間戳記造成的問題
+    if hasattr(monday_date, 'date'):
+        monday_date_only = monday_date.date()
+    elif isinstance(monday_date, pd.Timestamp):
+        monday_date_only = monday_date.date()
+    else:
+        monday_date_only = monday_date
+    
+    week_start = pd.Timestamp(monday_date_only) + timedelta(days=1)  # 週二 00:00:00
+    week_end = pd.Timestamp(monday_date_only) + timedelta(days=6)  # 週日 00:00:00
+    target_weekdays = get_target_weekdays(lottery_type)  # 根據彩種決定範圍
     
     week_records = df[
-        (df['日期'] > week_start) & 
-        (df['日期'] <= week_end) &
+        (df['日期'] >= week_start) & 
+        (df['日期'] <= week_end) &  # 包含週日當天
         (df['日期'].dt.weekday.isin(target_weekdays))
     ].copy()
     
@@ -349,7 +384,14 @@ def check_current_week_status(df, latest_monday, ball_a_index, ball_b_index, off
             return "已中獎", win_date, record
     
     # 如果本週已過完但沒中獎
-    if latest_record_date >= (monday_date + timedelta(days=5)).date():
+    # Fantasy5: 檢查到週日（+6天）
+    # 539: 檢查到週六（+5天）
+    if lottery_type == 'fantasy5':
+        check_days = 6  # 週日
+    else:
+        check_days = 5  # 週六
+    
+    if latest_record_date >= (monday_date + timedelta(days=check_days)).date():
         return "未中獎", None, None
     
     return "等待開獎", None, None
@@ -400,11 +442,15 @@ def add_strategy_sheet(file_path, lottery_type):
         if total_wins == 0:
             return "無中獎記錄"
         
-        day_names = {1: '週二', 2: '週三', 3: '週四', 4: '週五', 5: '週六'}
-        day_labels = {1: '第一天', 2: '第二天', 3: '第三天', 4: '第四天', 5: '第五天'}
+        day_names = {1: '週二', 2: '週三', 3: '週四', 4: '週五', 5: '週六', 6: '週日'}
+        day_labels = {1: '第一天', 2: '第二天', 3: '第三天', 4: '第四天', 5: '第五天', 6: '第六天'}
+        
+        # 根據 day_stats 中是否有週日來決定範圍
+        has_sunday = 6 in day_stats and day_stats[6] > 0
+        days_to_check = [1, 2, 3, 4, 5, 6] if has_sunday else [1, 2, 3, 4, 5]
         
         lines = []
-        for day in [1, 2, 3, 4, 5]:  # 週二到週六
+        for day in days_to_check:
             count = day_stats.get(day, 0)
             percentage = (count / total_wins * 100) if total_wins > 0 else 0.0
             lines.append(f"{day_names[day]} ({day_labels[day]}): {percentage:.1f}% ({count}次)")
