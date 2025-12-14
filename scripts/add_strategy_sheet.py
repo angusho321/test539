@@ -125,26 +125,36 @@ def preprocess_weekly_data(df, monday_records, weeks=52):
         
         # 建立該週所有開出號碼的 Set（用於快速查找）
         winning_set = set()
+        # 儲存每一天的開獎記錄（按日期排序，用於統計每一天的中獎情況）
+        daily_records = []  # List of (weekday, drawn_numbers)
+        
         if not week_records.empty:
-            for _, record in week_records.iterrows():
-                winning_set.update([
+            # 按日期排序
+            week_records_sorted = week_records.sort_values('日期')
+            for _, record in week_records_sorted.iterrows():
+                drawn_numbers = [
                     int(record['號碼1']),
                     int(record['號碼2']),
                     int(record['號碼3']),
                     int(record['號碼4']),
                     int(record['號碼5'])
-                ])
+                ]
+                winning_set.update(drawn_numbers)
+                # 儲存每一天的記錄（weekday: 1=週二, 2=週三, ..., 5=週六）
+                weekday = record['日期'].weekday()
+                daily_records.append((weekday, drawn_numbers))
         
         weekly_data.append({
             'monday_date': monday_date,  # 保存週一日期，用於顯示
             'monday_nums': monday_nums,
             'winning_set': winning_set,
+            'daily_records': daily_records,  # 每一天的開獎記錄
             'has_data': len(winning_set) > 0  # 標記是否有開獎資料
         })
     
     return weekly_data
 
-def backtest_strategy_optimized(weekly_data, ball_a_index, ball_b_index, offset_a, offset_b, df=None):
+def backtest_strategy_optimized(weekly_data, ball_a_index, ball_b_index, offset_a, offset_b):
     """
     優化版回測策略：使用預處理的資料進行純記憶體比對
     weekly_data: 預處理的每週資料（來自 preprocess_weekly_data）
@@ -152,7 +162,6 @@ def backtest_strategy_optimized(weekly_data, ball_a_index, ball_b_index, offset_
     ball_b_index: 第二顆球的索引（1-5）
     offset_a: 第一顆球的偏移量
     offset_b: 第二顆球的偏移量
-    df: 原始 DataFrame（用於查詢每一天的中獎情況）
     
     返回: (win_rate, wins, total, missed_weeks, day_stats)
     missed_weeks: 未中獎的週一日期列表
@@ -165,8 +174,6 @@ def backtest_strategy_optimized(weekly_data, ball_a_index, ball_b_index, offset_
     total = 0
     missed_weeks = []  # 記錄未中獎的週
     day_stats = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}  # 1=週二, 2=週三, 3=週四, 4=週五, 5=週六
-    
-    target_weekdays = get_target_weekdays('539')  # [1, 2, 3, 4, 5]
     
     for week_info in weekly_data:
         # 跳過沒有開獎資料的週
@@ -185,48 +192,22 @@ def backtest_strategy_optimized(weekly_data, ball_a_index, ball_b_index, offset_
         
         total += 1
         
-        # 如果提供了 df，查詢每一天的中獎情況
-        if df is not None:
-            week_start = monday_date
-            week_end = monday_date + timedelta(days=6)
-            
-            week_records = df[
-                (df['日期'] > week_start) & 
-                (df['日期'] <= week_end) &
-                (df['日期'].dt.weekday.isin(target_weekdays))
-            ].copy()
-            
-            # 按日期排序
-            week_records = week_records.sort_values('日期')
-            
-            # 檢查每一天是否中獎（只記錄第一次中獎的日期）
+        # 使用預處理的 daily_records 來統計每一天的中獎情況（避免查詢 DataFrame）
+        daily_records = week_info.get('daily_records', [])
+        winning_set = week_info['winning_set']
+        
+        if A in winning_set or B in winning_set:
+            wins += 1
+            # 找出第一次中獎的日期（用於統計每一天的中獎情況）
             found_win = False
-            for _, record in week_records.iterrows():
-                drawn_numbers = [
-                    int(record['號碼1']),
-                    int(record['號碼2']),
-                    int(record['號碼3']),
-                    int(record['號碼4']),
-                    int(record['號碼5'])
-                ]
-                
+            for weekday, drawn_numbers in daily_records:
                 if A in drawn_numbers or B in drawn_numbers:
-                    # 取得這一天是週幾（0=週一, 1=週二, ..., 5=週六）
-                    weekday = record['日期'].weekday()  # 1=週二, 2=週三, 3=週四, 4=週五, 5=週六
                     day_stats[weekday] += 1
-                    wins += 1
                     found_win = True
                     break  # 只記錄第一次中獎
-            
-            if not found_win:
-                missed_weeks.append(monday_date)
         else:
-            # 如果沒有提供 df，使用原來的邏輯（只檢查是否中獎，不記錄日期）
-            winning_set = week_info['winning_set']
-            if A in winning_set or B in winning_set:
-                wins += 1
-            else:
-                missed_weeks.append(monday_date)
+            # 記錄未中獎的週
+            missed_weeks.append(monday_date)
     
     win_rate = (wins / total * 100) if total > 0 else 0.0
     return win_rate, wins, total, missed_weeks, day_stats
@@ -276,8 +257,7 @@ def find_best_strategies(df, monday_records, lottery_type, weeks=52, min_win_rat
                     win_rate, wins, total, missed_weeks, day_stats = backtest_strategy_optimized(
                         weekly_data,
                         ball_a_index, ball_b_index,
-                        offset_a, offset_b,
-                        df=df  # 傳入 df 以便查詢每一天的中獎情況
+                        offset_a, offset_b
                     )
                     
                     # 只保留勝率超過閾值的策略
