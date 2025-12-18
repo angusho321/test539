@@ -77,12 +77,20 @@ jobs:
         LOTTERY_HIST_FILE_ID: ${{ secrets.LOTTERY_HIST_FILE_ID }}
       run: python scripts/upload_lottery_hist.py
       
-    # 步驟 1.5: 執行週一冠軍策略分析
-    - name: 🎯 Add Monday Strategy Analysis Sheet
-      run: python scripts/add_strategy_sheet.py --type 539 --file lottery_hist.xlsx
+    # 步驟 1.5: 執行週一冠軍策略分析（僅週日執行）
+    - name: 🎯 Add Monday Strategy Analysis Sheet (Sunday only)
+      run: |
+        DAY_OF_WEEK=$(date -u +%u)
+        if [ "$DAY_OF_WEEK" = "7" ]; then
+          echo "📅 今天是週日，執行週一冠軍策略分析..."
+          python scripts/add_strategy_sheet.py --type 539 --file lottery_hist.xlsx
+        else
+          echo "⏭️ 今天不是週日，跳過週一冠軍策略分析"
+        fi
       
-    # 步驟 1.6: 重新上傳包含策略分析的歷史檔案
-    - name: ⬆️ Re-upload lottery history with strategy sheet
+    # 步驟 1.6: 重新上傳包含策略分析的歷史檔案（僅週日執行）
+    - name: ⬆️ Re-upload lottery history with strategy sheet (Sunday only)
+      if: steps.check_sunday.outputs.is_sunday == 'true'
       env:
         LOTTERY_HIST_FILE_ID: ${{ secrets.LOTTERY_HIST_FILE_ID }}
       run: python scripts/upload_lottery_hist.py
