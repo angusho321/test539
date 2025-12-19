@@ -57,6 +57,20 @@ jobs:
       run: python scripts/upload_fantasy5_hist.py
       
     # --- 週一冠軍策略分析（僅週二執行） ---
+    # 下載現有的週一策略檔案
+    - name: ⬇️ Download existing Fantasy5 Monday Strategy (Tuesday only)
+      env:
+        FANTASY5_MONDAY_STRATEGY_FILE_ID: ${{ secrets.FANTASY5_MONDAY_STRATEGY_FILE_ID }}
+      run: |
+        DAY_OF_WEEK=$(date -u +%u)
+        if [ "$DAY_OF_WEEK" = "2" ]; then
+          echo "📅 今天是週二，下載現有的週一策略檔案..."
+          python scripts/download_fantasy5_monday_strategy.py
+        else
+          echo "⏭️ 今天不是週二，跳過下載週一策略檔案"
+        fi
+      
+    # 執行週一冠軍策略分析
     - name: 🎯 Add Monday Strategy Analysis Sheet (Tuesday only)
       run: |
         DAY_OF_WEEK=$(date -u +%u)
@@ -67,17 +81,17 @@ jobs:
           echo "⏭️ 今天不是週二，跳過週一冠軍策略分析"
         fi
       
-    # 重新上傳包含策略分析的歷史檔案（僅週二執行）
-    - name: ⬆️ Re-upload Fantasy 5 history with strategy sheet (Tuesday only)
+    # 上傳週一策略檔案
+    - name: ⬆️ Upload Fantasy5 Monday Strategy (Tuesday only)
       env:
-        FANTASY5_HIST_FILE_ID: ${{ secrets.FANTASY5_HIST_FILE_ID }}
+        FANTASY5_MONDAY_STRATEGY_FILE_ID: ${{ secrets.FANTASY5_MONDAY_STRATEGY_FILE_ID }}
       run: |
         DAY_OF_WEEK=$(date -u +%u)
         if [ "$DAY_OF_WEEK" = "2" ]; then
-          echo "📅 今天是週二，重新上傳包含策略分析的歷史檔案..."
-          python scripts/upload_fantasy5_hist.py
+          echo "📅 今天是週二，上傳週一策略檔案..."
+          python scripts/upload_fantasy5_monday_strategy.py
         else
-          echo "⏭️ 今天不是週二，跳過重新上傳"
+          echo "⏭️ 今天不是週二，跳過上傳週一策略檔案"
         fi
       
     # --- 預測與驗證區 ---
@@ -124,5 +138,6 @@ jobs:
           fantasy5_hist.xlsx
           fantasy5_prediction_log.xlsx
           best_strategies_fantasy5.xlsx
+          fantasy5_monday_strategy.xlsx
           *.log
         retention-days: 30

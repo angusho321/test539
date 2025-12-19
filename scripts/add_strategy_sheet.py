@@ -404,8 +404,8 @@ def check_current_week_status(df, latest_monday, ball_a_index, ball_b_index, off
     
     return "等待開獎", None, None
 
-def add_strategy_sheet(file_path, lottery_type):
-    """將策略分析結果寫入 Excel 的新分頁"""
+def add_strategy_sheet(file_path, lottery_type, output_file=None):
+    """將策略分析結果寫入獨立的 Excel 檔案"""
     print(f"📊 開始分析 {lottery_type} 的週一冠軍策略...")
     
     # 讀取資料
@@ -505,21 +505,27 @@ def add_strategy_sheet(file_path, lottery_type):
     
     strategy_df = pd.DataFrame(rows)
     
-    # 使用 openpyxl 來處理 Excel（保留原有分頁）
+    # 決定輸出檔案路徑
+    if output_file is None:
+        if lottery_type == '539':
+            output_file = '539_monday_strategy.xlsx'
+        else:
+            output_file = 'fantasy5_monday_strategy.xlsx'
+    
+    # 使用 openpyxl 來創建新的 Excel 檔案
     try:
-        book = load_workbook(file_path)
-        
-        # 如果 Monday_Strategy 分頁已存在，刪除它
-        if 'Monday_Strategy' in book.sheetnames:
-            print("🔄 刪除舊的 Monday_Strategy 分頁...")
-            del book['Monday_Strategy']
-        
-        # 創建新的分頁
+        from openpyxl import Workbook
         from openpyxl.utils.dataframe import dataframe_to_rows
+        from openpyxl.styles import Font, Alignment
+        
+        # 創建新的工作簿
+        book = Workbook()
+        # 刪除預設的工作表
+        book.remove(book.active)
+        # 創建新的工作表
         ws = book.create_sheet('Monday_Strategy')
         
         # 寫入標題（加粗）
-        from openpyxl.styles import Font, Alignment
         headers = ['組別', '號碼組', '勝率', '槓龜週', '每日中獎統計']
         for col_idx, header in enumerate(headers, start=1):
             cell = ws.cell(row=1, column=col_idx, value=header)
@@ -541,8 +547,8 @@ def add_strategy_sheet(file_path, lottery_type):
         ws.column_dimensions['E'].width = 50  # 每日中獎統計
         
         # 保存
-        book.save(file_path)
-        print(f"✅ 成功將策略分析結果寫入 {file_path} 的 Monday_Strategy 分頁")
+        book.save(output_file)
+        print(f"✅ 成功將策略分析結果寫入獨立檔案: {output_file}")
         return True
         
     except Exception as e:
@@ -550,25 +556,11 @@ def add_strategy_sheet(file_path, lottery_type):
         print("   嘗試使用 pandas 方法...")
         # 如果 openpyxl 方法失敗，嘗試使用 pandas
         try:
-            # 先讀取原有資料
-            existing_sheets = {}
-            try:
-                excel_file = pd.ExcelFile(file_path, engine='openpyxl')
-                for sheet_name in excel_file.sheet_names:
-                    if sheet_name != 'Monday_Strategy':
-                        existing_sheets[sheet_name] = pd.read_excel(file_path, sheet_name=sheet_name, engine='openpyxl')
-            except:
-                pass
-            
-            # 寫入所有分頁（包括新的 Monday_Strategy）
-            with pd.ExcelWriter(file_path, engine='openpyxl', mode='w') as writer:
-                # 寫入原有分頁
-                for sheet_name, sheet_df in existing_sheets.items():
-                    sheet_df.to_excel(writer, sheet_name=sheet_name, index=False)
-                # 寫入新的策略分頁
+            # 寫入新的策略檔案
+            with pd.ExcelWriter(output_file, engine='openpyxl', mode='w') as writer:
                 strategy_df.to_excel(writer, sheet_name='Monday_Strategy', index=False)
             
-            print(f"✅ 成功將策略分析結果寫入 {file_path} 的 Monday_Strategy 分頁（使用 pandas）")
+            print(f"✅ 成功將策略分析結果寫入獨立檔案: {output_file}（使用 pandas）")
             return True
         except Exception as e2:
             print(f"❌ 使用 pandas 寫入也失敗: {e2}")
@@ -579,14 +571,16 @@ def add_strategy_sheet(file_path, lottery_type):
 def main():
     parser = argparse.ArgumentParser(description='週一冠軍策略分析')
     parser.add_argument('--type', choices=['539', 'fantasy5'], required=True, help='彩球類型')
-    parser.add_argument('--file', required=True, help='Excel 檔案路徑')
+    parser.add_argument('--file', required=True, help='歷史記錄 Excel 檔案路徑')
+    parser.add_argument('--output', help='輸出檔案路徑（可選，預設為 539_monday_strategy.xlsx 或 fantasy5_monday_strategy.xlsx）')
     
     args = parser.parse_args()
     
     lottery_type = args.type
     file_path = args.file
+    output_file = args.output
     
-    success = add_strategy_sheet(file_path, lottery_type)
+    success = add_strategy_sheet(file_path, lottery_type, output_file)
     sys.exit(0 if success else 1)
 
 if __name__ == "__main__":
