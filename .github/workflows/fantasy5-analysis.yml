@@ -107,20 +107,20 @@ jobs:
       run: python fantasy5_prediction_only.py
 
     # ========================================================
-    # ★ 執行進階策略分析 (僅分析天天樂，僅週二執行)
+    # ★ 執行進階策略分析 (僅分析天天樂，僅週日執行)
     # ========================================================
-    - name: 🧠 Run Advanced Strategy Analysis (Fantasy5 only, Tuesday only)
+    - name: 🧠 Run Advanced Strategy Analysis (Fantasy5 only, Sunday only)
       env:
         GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
         GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         BEST_STRATEGIES_FANTASY5_FILE_ID: ${{ secrets.BEST_STRATEGIES_FANTASY5_FILE_ID }}
       run: |
         DAY_OF_WEEK=$(date -u +%u)
-        if [ "$DAY_OF_WEEK" = "2" ]; then
-          echo "📅 今天是週二，執行進階策略分析（為周一策略準備）..."
+        if [ "$DAY_OF_WEEK" = "7" ]; then
+          echo "📅 今天是週日，執行進階策略分析..."
           python auto_analyze_strategies.py --type fantasy5
         else
-          echo "⏭️ 今天不是週二，跳過進階策略分析"
+          echo "⏭️ 今天不是週日，跳過進階策略分析"
         fi
       
     # --- 上傳與歸檔 ---
