@@ -427,6 +427,38 @@ def add_strategy_sheet(file_path, lottery_type, output_file=None):
     latest_monday = monday_records.iloc[-1]
     latest_monday_date = latest_monday['日期']
     
+    # 檢查當周禮拜一的開獎號碼是否已經出來了
+    # 如果今天是週二，應該要能取得到昨天的週一開獎記錄
+    today = datetime.now().date()
+    if hasattr(latest_monday_date, 'date'):
+        latest_monday_date_only = latest_monday_date.date()
+    elif isinstance(latest_monday_date, pd.Timestamp):
+        latest_monday_date_only = latest_monday_date.date()
+    else:
+        latest_monday_date_only = pd.to_datetime(latest_monday_date).date()
+    
+    # 計算要檢查的週一日期
+    # 如果今天是週二，要檢查的是「當周禮拜一」（昨天）的開獎號碼
+    # 如果今天是週一，要檢查的是「上一個週一」的開獎號碼（因為今天的開獎號碼可能還沒出來）
+    # 如果今天是其他天，要檢查的是「當周禮拜一」的開獎號碼
+    if today.weekday() == 0:  # 如果今天是週一
+        # 檢查上一個週一（7天前）
+        expected_monday = today - timedelta(days=7)
+    else:
+        # 檢查當周禮拜一（今天往前推weekday()天）
+        expected_monday = today - timedelta(days=today.weekday())
+    
+    # 檢查最新的週一記錄是否為當周或上一個週一
+    # 如果最新的週一記錄日期小於預期的週一日期，表示當周週一的開獎號碼還沒出來
+    if latest_monday_date_only < expected_monday:
+        print(f"⚠️ 警告：當周禮拜一（{expected_monday}）的開獎號碼尚未記錄")
+        print(f"   最新的週一記錄日期：{latest_monday_date_only}")
+        print(f"   請確認當周禮拜一的開獎號碼已經記錄在歷史檔案中")
+        return False
+    
+    print(f"✅ 確認當周禮拜一（{latest_monday_date_only}）的開獎號碼已記錄")
+    print(f"   開獎號碼：{latest_monday['號碼1']} {latest_monday['號碼2']} {latest_monday['號碼3']} {latest_monday['號碼4']} {latest_monday['號碼5']}")
+    
     # 動態分析找出最佳策略（勝率 > 90%）
     best_strategies = find_best_strategies(df, monday_records, lottery_type, weeks=52, min_win_rate=90.0)
     
@@ -474,8 +506,22 @@ def add_strategy_sheet(file_path, lottery_type, output_file=None):
         missed_weeks_str = format_missed_weeks(strategy.get('missed_weeks', []))
         day_stats_str = format_day_stats(strategy.get('day_stats', {}), strategy.get('wins', 0))
         
-        # 號碼組格式：第X顆球+偏移量 第Y顆球+偏移量
-        number_group = f"{ball_a_name}+{strategy['offset_a']} {ball_b_name}+{strategy['offset_b']}"
+        # 根據當周禮拜一的開獎號碼計算實際號碼
+        try:
+            actual_num_a, actual_num_b = calculate_strategy_numbers(
+                latest_monday,
+                strategy['ball_a_index'],
+                strategy['ball_b_index'],
+                strategy['offset_a'],
+                strategy['offset_b']
+            )
+            # 號碼組格式：第X顆球+偏移量=實際號碼 第Y顆球+偏移量=實際號碼
+            number_group = f"{ball_a_name}+{strategy['offset_a']}={actual_num_a:02d} {ball_b_name}+{strategy['offset_b']}={actual_num_b:02d}"
+        except Exception as e:
+            print(f"⚠️ 計算實際號碼時發生錯誤: {e}")
+            # 如果計算失敗，使用原格式
+            number_group = f"{ball_a_name}+{strategy['offset_a']} {ball_b_name}+{strategy['offset_b']}"
+        
         # 勝率格式：XX%
         win_rate_str = f"{strategy['win_rate']:.0f}%"
         

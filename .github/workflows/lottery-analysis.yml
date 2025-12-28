@@ -44,6 +44,19 @@ jobs:
           echo "📅 今天不是週日，執行正常流程"
         fi
     
+    # 檢查是否為週二（539 週一策略執行日）
+    - name: 📅 Check if Tuesday (Monday Strategy execution day)
+      id: check_tuesday
+      run: |
+        DAY_OF_WEEK=$(date -u +%u)
+        if [ "$DAY_OF_WEEK" = "2" ]; then
+          echo "is_tuesday=true" >> $GITHUB_OUTPUT
+          echo "📅 今天是週二，執行週一策略分析"
+        else
+          echo "is_tuesday=false" >> $GITHUB_OUTPUT
+          echo "📅 今天不是週二，跳過週一策略分析"
+        fi
+    
     # 步驟 1: 記錄昨天的開獎號碼（每天執行，包括週日）
     - name: ⬇️ Download existing lottery history
       env:
@@ -77,23 +90,23 @@ jobs:
         LOTTERY_HIST_FILE_ID: ${{ secrets.LOTTERY_HIST_FILE_ID }}
       run: python scripts/upload_lottery_hist.py
       
-    # 步驟 1.5: 下載現有的週一策略檔案（僅週日執行）
-    - name: ⬇️ Download existing 539 Monday Strategy (Sunday only)
-      if: steps.check_sunday.outputs.is_sunday == 'true'
+    # 步驟 1.5: 下載現有的週一策略檔案（僅週二執行）
+    - name: ⬇️ Download existing 539 Monday Strategy (Tuesday only)
+      if: steps.check_tuesday.outputs.is_tuesday == 'true'
       env:
         MONDAY_STRATEGY_539_FILE_ID: ${{ secrets.MONDAY_STRATEGY_539_FILE_ID }}
       run: python scripts/download_539_monday_strategy.py
       
-    # 步驟 1.6: 執行週一冠軍策略分析（僅週日執行）
-    - name: 🎯 Add Monday Strategy Analysis Sheet (Sunday only)
-      if: steps.check_sunday.outputs.is_sunday == 'true'
+    # 步驟 1.6: 執行週一冠軍策略分析（僅週二執行）
+    - name: 🎯 Add Monday Strategy Analysis Sheet (Tuesday only)
+      if: steps.check_tuesday.outputs.is_tuesday == 'true'
       run: |
-        echo "📅 今天是週日，執行週一冠軍策略分析..."
+        echo "📅 今天是週二，執行週一冠軍策略分析..."
         python scripts/add_strategy_sheet.py --type 539 --file lottery_hist.xlsx
       
-    # 步驟 1.7: 上傳週一策略檔案（僅週日執行）
-    - name: ⬆️ Upload 539 Monday Strategy (Sunday only)
-      if: steps.check_sunday.outputs.is_sunday == 'true'
+    # 步驟 1.7: 上傳週一策略檔案（僅週二執行）
+    - name: ⬆️ Upload 539 Monday Strategy (Tuesday only)
+      if: steps.check_tuesday.outputs.is_tuesday == 'true'
       env:
         MONDAY_STRATEGY_539_FILE_ID: ${{ secrets.MONDAY_STRATEGY_539_FILE_ID }}
       run: python scripts/upload_539_monday_strategy.py
