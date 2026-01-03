@@ -334,8 +334,36 @@ def find_best_strategies(df, monday_records, lottery_type, weeks=52, min_win_rat
     
     print(f"   去除重複後，剩餘 {len(unique_strategies)} 組唯一策略")
     
+    # 進一步去重：確保每個「球號+偏移量」組合只出現一次
+    # 例如：如果「第一顆球+6」已經被使用，則跳過其他包含「第一顆球+6」的策略
+    used_ball_offset_combos = set()  # 記錄已使用的「球號+偏移量」組合
+    final_strategies = []
+    
+    for strategy in unique_strategies:
+        ball_a = strategy['ball_a_index']
+        ball_b = strategy['ball_b_index']
+        offset_a = strategy['offset_a']
+        offset_b = strategy['offset_b']
+        
+        # 建立兩個「球號+偏移量」組合
+        combo_a = (ball_a, offset_a)
+        combo_b = (ball_b, offset_b)
+        
+        # 如果兩個組合都還沒被使用過，則加入結果
+        if combo_a not in used_ball_offset_combos and combo_b not in used_ball_offset_combos:
+            final_strategies.append(strategy)
+            used_ball_offset_combos.add(combo_a)
+            used_ball_offset_combos.add(combo_b)
+            
+            # 如果已經找到5組，停止搜尋
+            if len(final_strategies) >= 5:
+                break
+        # 如果其中一個組合已被使用，跳過該策略（因為已經有勝率更高的策略使用了該組合）
+    
+    print(f"   去除「球號+偏移量」重複後，剩餘 {len(final_strategies)} 組策略")
+    
     # 返回前五名（已去重）
-    return unique_strategies[:5]
+    return final_strategies
 
 def check_current_week_status(df, latest_monday, ball_a_index, ball_b_index, offset_a, offset_b, lottery_type):
     """檢查本週狀態（使用指定的球號和 offset）"""
