@@ -241,14 +241,22 @@ def calculate_window_win_rate(df, window_name, window_days, is_fantasy=False):
 
 def remove_duplicate_two_ball_combos(results):
     """
-    移除重複兩碼組合的策略，只保留勝率最高的
-    例如：07,22,24 和 07,24,28 都有 07,24，只保留勝率較高的
-    如果勝率相同，只保留第一個（按原始順序）
+    基於兩碼組合的代表性去重（方案B）
+    為每個兩碼組合保留一個最佳代表的三碼組合
+    確保每個兩碼組合都有對應的三碼組合，保持多樣性
+    
+    例如：
+    - 07,22,24 包含兩碼組合：(07,22), (07,24), (22,24)
+    - 07,24,28 包含兩碼組合：(07,24), (07,28), (24,28)
+    - 如果 07,22,24 勝率更高，則 (07,22), (07,24), (22,24) 都選它為代表
+    - 如果 07,24,28 勝率更高，則 (07,28), (24,28) 選它為代表
+    - 最終保留所有被選為代表的組合（去重）
     """
     if not results:
         return results
     
     # 建立兩碼組合到最佳三碼組合的映射
+    # 每個兩碼組合對應一個最佳的三碼組合（勝率最高）
     two_ball_to_best = {}  # {(ball1, ball2): best_result}
     
     # 第一遍：找出每個兩碼組合對應的最佳三碼組合
@@ -275,46 +283,26 @@ def remove_duplicate_two_ball_combos(results):
                         two_ball_to_best[two_ball_sorted] = result
                     # 如果勝率和中獎次數都相同，保留第一個（不更新）
     
-    # 第二遍：標記需要移除的組合
-    # 一個三碼組合要被移除，如果存在另一個包含相同兩碼且勝率更高（或相同但更早）的組合
-    to_remove = set()
+    # 第二遍：收集所有被選為代表的組合（去重）
+    # 一個三碼組合要被保留，當且僅當它至少有一個兩碼子組合選它為最佳代表
+    kept_combos = {}  # {combo_tuple: result} 使用字典自動去重
     
-    for i, result1 in enumerate(results):
-        combo1 = result1['combo']
-        two_ball_combos1 = [tuple(sorted(c)) for c in combinations(combo1, 2)]
-        
-        for j, result2 in enumerate(results):
-            if i >= j:  # 避免重複比較
-                continue
-            combo2 = result2['combo']
-            two_ball_combos2 = [tuple(sorted(c)) for c in combinations(combo2, 2)]
-            
-            # 檢查是否有相同的兩碼組合
-            common_two_balls = set(two_ball_combos1) & set(two_ball_combos2)
-            
-            if common_two_balls:
-                # 有相同的兩碼組合，比較勝率
-                if result1['win_rate'] < result2['win_rate']:
-                    to_remove.add(combo1)
-                elif result1['win_rate'] > result2['win_rate']:
-                    to_remove.add(combo2)
-                else:
-                    # 勝率相同，比較中獎次數
-                    if result1['wins'] < result2['wins']:
-                        to_remove.add(combo1)
-                    elif result1['wins'] > result2['wins']:
-                        to_remove.add(combo2)
-                    else:
-                        # 勝率和中獎次數都相同，保留第一個（移除後面的）
-                        to_remove.add(combo2)
+    for two_ball, best_result in two_ball_to_best.items():
+        combo_key = best_result['combo']
+        # 如果這個組合還沒被保留，或當前結果更好，則更新
+        if combo_key not in kept_combos:
+            kept_combos[combo_key] = best_result
+        else:
+            # 如果同一個組合被多個兩碼組合選中，確保保留的是最佳版本
+            existing = kept_combos[combo_key]
+            if best_result['win_rate'] > existing['win_rate']:
+                kept_combos[combo_key] = best_result
+            elif best_result['win_rate'] == existing['win_rate']:
+                if best_result['wins'] > existing['wins']:
+                    kept_combos[combo_key] = best_result
     
-    # 收集所有被保留的組合，保持原始順序
-    final_results = []
-    for result in results:
-        if result['combo'] not in to_remove:
-            final_results.append(result)
-    
-    # 按勝率重新排序（確保順序正確）
+    # 轉回列表，並按勝率排序
+    final_results = list(kept_combos.values())
     final_results.sort(key=lambda x: (x['win_rate'], x['wins']), reverse=True)
     
     return final_results
