@@ -138,7 +138,7 @@ def calculate_window_win_rate(df, window_name, window_days, is_fantasy=False):
     計算指定時間段的勝率（優化版本）
     規則：三個號碼中任一個在該時間段（三天）的任一天出現即算中獎
     
-    返回: [{'combo': tuple, 'win_rate': float, 'wins': int, 'total': int}, ...]
+    返回: [{'combo': tuple, 'win_rate': float, 'wins': int, 'total': int, 'missed_dates': list}, ...]
     """
     # 過濾出該時間段的資料
     window_data = df[df['Analysis_Date'].dt.weekday.isin(window_days)].copy()
@@ -158,13 +158,29 @@ def calculate_window_win_rate(df, window_name, window_days, is_fantasy=False):
     )
     
     # 預先計算每週的號碼聯集（該週時間段內所有開出的號碼）
+    # 同時記錄每週的時間段第一天日期
     week_unions = {}
+    week_first_dates = {}  # 記錄每週的時間段第一天日期
+    
+    # 時間段的第一天（weekday最小的那天）
+    first_weekday = min(window_days)
+    
     for (year, week), group in window_data.groupby('YearWeek'):
         union_set = set()
         for nums in group['Numbers']:
             if nums:
                 union_set.update(nums)
         week_unions[(year, week)] = union_set
+        
+        # 找到該週中時間段的第一天（weekday為first_weekday的那天）
+        first_day_records = group[group['Analysis_Date'].dt.weekday == first_weekday]
+        if len(first_day_records) > 0:
+            first_day = first_day_records['Analysis_Date'].min()
+            week_first_dates[(year, week)] = first_day.date()
+        else:
+            # 如果該週沒有第一天（例如該週的第一天還沒開獎），使用該週時間段內最早的那天
+            first_day = group['Analysis_Date'].min()
+            week_first_dates[(year, week)] = first_day.date()
     
     total_weeks = len(week_unions)
     if total_weeks == 0:
@@ -188,25 +204,95 @@ def calculate_window_win_rate(df, window_name, window_days, is_fantasy=False):
         
         combo_set = set(combo)
         wins = 0
+        missed_dates = []  # 記錄未中獎的時間段第一天日期
         
         # 使用預先計算的週聯集，快速判斷
-        for week_union in week_unions.values():
+        for (year, week), week_union in week_unions.items():
             # 如果組合與該週的號碼聯集有交集，則中獎
             if not combo_set.isdisjoint(week_union):
                 wins += 1
+            else:
+                # 未中獎，記錄該週的時間段第一天日期
+                first_date = week_first_dates.get((year, week))
+                if first_date:
+                    missed_dates.append(first_date)
         
         win_rate = wins / total_weeks
         results.append({
             'combo': combo,
             'win_rate': win_rate,
             'wins': wins,
-            'total': total_weeks
+            'total': total_weeks,
+            'missed_dates': sorted(missed_dates)  # 按日期排序
         })
     
-    # 按勝率排序，取前十名
+    # 按勝率排序
     results.sort(key=lambda x: x['win_rate'], reverse=True)
     print(f"\r         完成！找到 {len(results)} 組結果" + " " * 40)  # 清除進度顯示
-    return results[:10]
+    
+    # 先取前30名進行去重處理（確保有足夠的候選）
+    top_results = results[:30]
+    
+    # 移除重複兩碼組合的策略
+    deduplicated_results = remove_duplicate_two_ball_combos(top_results)
+    
+    # 返回去重後的前10名
+    return deduplicated_results[:10]
+
+def remove_duplicate_two_ball_combos(results):
+    """
+    移除重複兩碼組合的策略，只保留勝率最高的
+    例如：07,22,24 和 07,24,28 都有 07,24，只保留勝率較高的
+    如果勝率相同，只保留第一個（按原始順序）
+    """
+    if not results:
+        return results
+    
+    # 建立兩碼組合到最佳三碼組合的映射
+    two_ball_to_best = {}  # {(ball1, ball2): best_result}
+    
+    # 第一遍：找出每個兩碼組合對應的最佳三碼組合
+    for result in results:
+        combo = result['combo']
+        # 提取所有可能的兩碼子組合（C(3,2) = 3個）
+        two_ball_combos = list(combinations(combo, 2))
+        
+        for two_ball in two_ball_combos:
+            # 排序兩碼組合，確保一致性
+            two_ball_sorted = tuple(sorted(two_ball))
+            
+            # 如果這個兩碼組合還沒記錄，或當前組合勝率更高，則更新
+            if two_ball_sorted not in two_ball_to_best:
+                two_ball_to_best[two_ball_sorted] = result
+            else:
+                # 比較勝率，保留勝率更高的
+                current_best = two_ball_to_best[two_ball_sorted]
+                if result['win_rate'] > current_best['win_rate']:
+                    two_ball_to_best[two_ball_sorted] = result
+                # 如果勝率相同，比較中獎次數
+                elif result['win_rate'] == current_best['win_rate']:
+                    if result['wins'] > current_best['wins']:
+                        two_ball_to_best[two_ball_sorted] = result
+                    # 如果勝率和中獎次數都相同，保留第一個（不更新）
+    
+    # 第二遍：找出所有應該被保留的三碼組合
+    # 一個三碼組合要被保留，當且僅當它至少有一個兩碼子組合是該兩碼組合的最佳選擇
+    kept_combos = set()
+    for two_ball, best_result in two_ball_to_best.items():
+        kept_combos.add(best_result['combo'])
+    
+    # 收集所有被保留的組合，保持原始順序
+    final_results = []
+    seen_combos = set()
+    for result in results:
+        if result['combo'] in kept_combos and result['combo'] not in seen_combos:
+            final_results.append(result)
+            seen_combos.add(result['combo'])
+    
+    # 按勝率重新排序（確保順序正確）
+    final_results.sort(key=lambda x: (x['win_rate'], x['wins']), reverse=True)
+    
+    return final_results
 
 def format_combo_result(result):
     """格式化組合結果"""
@@ -214,10 +300,20 @@ def format_combo_result(result):
     win_rate_pct = result['win_rate'] * 100
     return f"{combo_str} [{win_rate_pct:.1f}% ({result['wins']}/{result['total']})]"
 
+def format_missed_dates(missed_dates):
+    """格式化未中獎日期（顯示所有日期）"""
+    if not missed_dates:
+        return ""
+    
+    # 格式化為 YYYY/MM/DD，顯示所有日期
+    formatted_dates = [date.strftime('%Y/%m/%d') if hasattr(date, 'strftime') else str(date) for date in missed_dates]
+    
+    return ", ".join(formatted_dates)
+
 def generate_predictions(df, is_fantasy=False):
     """
     生成所有時間段的預測
-    返回: DataFrame，包含各時間段的勝率前十名
+    返回: DataFrame，包含各時間段的勝率前十名和槓龜日期
     """
     print(f"   🔍 開始計算各時間段勝率...")
     
@@ -235,18 +331,41 @@ def generate_predictions(df, is_fantasy=False):
     # 找出最長的結果列表（最多10個）
     max_len = max(len(results) for results in window_results.values()) if window_results else 0
     
-    # 動態創建輸出數據（根據時間段）
-    output_data = {name: [] for name in time_windows.keys()}
+    # 動態創建輸出數據（根據時間段，每個時間段後面加一個槓龜欄位）
+    # 構建欄位順序和數據
+    columns = []
+    data_dict = {}
+    window_to_missed = {}  # 建立時間段名稱到槓龜欄位名稱的對應關係
+    
+    # 為每個時間段創建兩個欄位：時間段名稱和「槓龜1」、「槓龜2」等
+    missed_counter = 1
+    for window_name in time_windows.keys():
+        columns.append(window_name)
+        missed_col_name = f"槓龜{missed_counter}"
+        columns.append(missed_col_name)
+        # 初始化數據列表
+        data_dict[window_name] = []
+        data_dict[missed_col_name] = []
+        # 記錄對應關係
+        window_to_missed[window_name] = missed_col_name
+        missed_counter += 1
     
     for i in range(max_len):
         for window_name in time_windows.keys():
+            missed_col_name = window_to_missed[window_name]
             if i < len(window_results[window_name]):
-                output_data[window_name].append(format_combo_result(window_results[window_name][i]))
+                result = window_results[window_name][i]
+                data_dict[window_name].append(format_combo_result(result))
+                # 格式化槓龜日期（顯示所有日期）
+                missed_dates = result.get('missed_dates', [])
+                data_dict[missed_col_name].append(format_missed_dates(missed_dates))
             else:
-                output_data[window_name].append("")
+                data_dict[window_name].append("")
+                data_dict[missed_col_name].append("")
     
     # 創建 DataFrame
-    result_df = pd.DataFrame(output_data)
+    result_df = pd.DataFrame({col: data_dict[col] for col in columns})
+    result_df = result_df[columns]  # 確保欄位順序正確
     
     return result_df
 
