@@ -275,19 +275,44 @@ def remove_duplicate_two_ball_combos(results):
                         two_ball_to_best[two_ball_sorted] = result
                     # 如果勝率和中獎次數都相同，保留第一個（不更新）
     
-    # 第二遍：找出所有應該被保留的三碼組合
-    # 一個三碼組合要被保留，當且僅當它至少有一個兩碼子組合是該兩碼組合的最佳選擇
-    kept_combos = set()
-    for two_ball, best_result in two_ball_to_best.items():
-        kept_combos.add(best_result['combo'])
+    # 第二遍：標記需要移除的組合
+    # 一個三碼組合要被移除，如果存在另一個包含相同兩碼且勝率更高（或相同但更早）的組合
+    to_remove = set()
+    
+    for i, result1 in enumerate(results):
+        combo1 = result1['combo']
+        two_ball_combos1 = [tuple(sorted(c)) for c in combinations(combo1, 2)]
+        
+        for j, result2 in enumerate(results):
+            if i >= j:  # 避免重複比較
+                continue
+            combo2 = result2['combo']
+            two_ball_combos2 = [tuple(sorted(c)) for c in combinations(combo2, 2)]
+            
+            # 檢查是否有相同的兩碼組合
+            common_two_balls = set(two_ball_combos1) & set(two_ball_combos2)
+            
+            if common_two_balls:
+                # 有相同的兩碼組合，比較勝率
+                if result1['win_rate'] < result2['win_rate']:
+                    to_remove.add(combo1)
+                elif result1['win_rate'] > result2['win_rate']:
+                    to_remove.add(combo2)
+                else:
+                    # 勝率相同，比較中獎次數
+                    if result1['wins'] < result2['wins']:
+                        to_remove.add(combo1)
+                    elif result1['wins'] > result2['wins']:
+                        to_remove.add(combo2)
+                    else:
+                        # 勝率和中獎次數都相同，保留第一個（移除後面的）
+                        to_remove.add(combo2)
     
     # 收集所有被保留的組合，保持原始順序
     final_results = []
-    seen_combos = set()
     for result in results:
-        if result['combo'] in kept_combos and result['combo'] not in seen_combos:
+        if result['combo'] not in to_remove:
             final_results.append(result)
-            seen_combos.add(result['combo'])
     
     # 按勝率重新排序（確保順序正確）
     final_results.sort(key=lambda x: (x['win_rate'], x['wins']), reverse=True)
