@@ -230,8 +230,8 @@ def calculate_window_win_rate(df, window_name, window_days, is_fantasy=False):
     results.sort(key=lambda x: x['win_rate'], reverse=True)
     print(f"\r         完成！找到 {len(results)} 組結果" + " " * 40)  # 清除進度顯示
     
-    # 先取前30名進行去重處理（確保有足夠的候選）
-    top_results = results[:30]
+    # 先取前60名進行去重處理（確保去重後有足夠的候選）
+    top_results = results[:60]
     
     # 移除重複兩碼組合的策略
     deduplicated_results = remove_duplicate_two_ball_combos(top_results)
