@@ -241,12 +241,16 @@ def calculate_window_win_rate(df, window_name, window_days, is_fantasy=False):
 
 def remove_duplicate_two_ball_combos(results):
     """
-    移除重複兩碼組合的策略，只保留勝率最高的
-    如果兩個組合包含相同的兩碼，只保留勝率最高的那個
+    基於兩碼組合的代表性去重（方案B）
+    為每個兩碼組合保留一個最佳代表的三碼組合
+    確保每個兩碼組合都有對應的三碼組合，保持多樣性
     
     例如：
-    - 07,22,24 和 07,22,33 都包含 (07,22)，只保留勝率較高的
-    - 如果勝率相同，比較中獎次數；都相同則保留第一個
+    - 07,22,24 包含兩碼組合：(07,22), (07,24), (22,24)
+    - 07,24,28 包含兩碼組合：(07,24), (07,28), (24,28)
+    - 如果 07,22,24 勝率更高，則 (07,22), (07,24), (22,24) 都選它為代表
+    - 如果 07,24,28 勝率更高，則 (07,28), (24,28) 選它為代表
+    - 最終保留所有被選為代表的組合（去重）
     """
     if not results:
         return results
@@ -279,35 +283,26 @@ def remove_duplicate_two_ball_combos(results):
                         two_ball_to_best[two_ball_sorted] = result
                     # 如果勝率和中獎次數都相同，保留第一個（不更新）
     
-    # 第二遍：標記需要保留的組合
-    # 一個三碼組合要被保留，當且僅當它的所有兩碼子組合都選它為最佳代表
-    # 這樣可以確保：如果兩個組合有相同的兩碼，只保留勝率更高的那個
-    kept_combos = set()
+    # 第二遍：收集所有被選為代表的組合（去重）
+    # 一個三碼組合要被保留，當且僅當它至少有一個兩碼子組合選它為最佳代表
+    kept_combos = {}  # {combo_tuple: result} 使用字典自動去重
     
-    for result in results:
-        combo = result['combo']
-        two_ball_combos = [tuple(sorted(c)) for c in combinations(combo, 2)]
-        
-        # 檢查這個組合的所有兩碼子組合是否都選它為最佳代表
-        is_best_for_all = True
-        for two_ball in two_ball_combos:
-            best_for_two_ball = two_ball_to_best.get(two_ball)
-            if best_for_two_ball is None or best_for_two_ball['combo'] != combo:
-                is_best_for_all = False
-                break
-        
-        if is_best_for_all:
-            kept_combos.add(combo)
+    for two_ball, best_result in two_ball_to_best.items():
+        combo_key = best_result['combo']
+        # 如果這個組合還沒被保留，或當前結果更好，則更新
+        if combo_key not in kept_combos:
+            kept_combos[combo_key] = best_result
+        else:
+            # 如果同一個組合被多個兩碼組合選中，確保保留的是最佳版本
+            existing = kept_combos[combo_key]
+            if best_result['win_rate'] > existing['win_rate']:
+                kept_combos[combo_key] = best_result
+            elif best_result['win_rate'] == existing['win_rate']:
+                if best_result['wins'] > existing['wins']:
+                    kept_combos[combo_key] = best_result
     
-    # 收集所有被保留的組合
-    final_results = []
-    seen_combos = set()
-    for result in results:
-        if result['combo'] in kept_combos and result['combo'] not in seen_combos:
-            final_results.append(result)
-            seen_combos.add(result['combo'])
-    
-    # 按勝率重新排序（確保順序正確）
+    # 轉回列表，並按勝率排序
+    final_results = list(kept_combos.values())
     final_results.sort(key=lambda x: (x['win_rate'], x['wins']), reverse=True)
     
     return final_results
