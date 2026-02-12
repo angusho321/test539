@@ -40,33 +40,27 @@ def get_time_windows(is_fantasy=False):
     """根據彩球類型返回對應的時間段"""
     return TIME_WINDOWS_FANTASY if is_fantasy else TIME_WINDOWS_539
 
-# 使用近一年的紀錄
 RECENT_YEARS = 1
+RECENT_MONTHS_539 = 3
 
 # ==========================================
 # 核心演算法
 # ==========================================
 
-def load_data(file_path, is_fantasy=False):
-    """讀取資料並處理時區，只保留近一年的紀錄"""
+def load_data(file_path, is_fantasy=False, recent_days=None):
+    """讀取資料並處理時區。recent_days: 保留最近 N 天，None 表示一年。"""
     df = None
-    
-    # 先嘗試讀取 Excel
     if os.path.exists(file_path):
         try:
             df = pd.read_excel(file_path, engine='openpyxl')
         except Exception as e:
             print(f"   ⚠️ 讀取 Excel 失敗: {e}，嘗試 CSV...")
-    
-    # 如果 Excel 不存在或讀取失敗，嘗試 CSV
     if df is None:
-        # 嘗試多種可能的 CSV 檔名
         csv_paths = [
             file_path.replace('.xlsx', '.csv'),
             file_path.replace('.xlsx', ' - Sheet1.csv'),
             file_path + ' - Sheet1.csv'
         ]
-        
         for csv_path in csv_paths:
             if os.path.exists(csv_path):
                 try:
@@ -76,12 +70,10 @@ def load_data(file_path, is_fantasy=False):
                 except Exception as e:
                     print(f"   ⚠️ 讀取 CSV 失敗 ({csv_path}): {e}")
                     continue
-    
     if df is None:
         print(f"❌ 無法讀取文件: {file_path}")
         return None
 
-    # 處理日期欄位：支援多種日期格式（包含或不包含時間）
     try:
         df['日期'] = pd.to_datetime(df['日期'], format='mixed', errors='coerce')
         if df['日期'].isna().any():
@@ -90,32 +82,23 @@ def load_data(file_path, is_fantasy=False):
             df['日期'] = pd.to_datetime(df['日期'], format='%Y-%m-%d', errors='coerce')
     except:
         df['日期'] = pd.to_datetime(df['日期'], errors='coerce')
-    
-    # 移除無法解析的日期行
     df = df.dropna(subset=['日期'])
-    
-    # 時區處理
+
     if is_fantasy:
-        # 天天樂: 美國時間 + 1天 = 台灣下注時間
         df['Analysis_Date'] = df['日期'] + pd.Timedelta(days=1)
     else:
-        # 539: 不需要轉換
         df['Analysis_Date'] = df['日期']
-    
-    # 計算近一年的日期範圍
+
     max_date = df['Analysis_Date'].max()
-    cutoff_date = max_date - pd.Timedelta(days=365 * RECENT_YEARS)
-    
-    # 只保留近一年的紀錄
+    days = recent_days if recent_days is not None else (365 * RECENT_YEARS)
+    cutoff_date = max_date - pd.Timedelta(days=days)
     df = df[df['Analysis_Date'] >= cutoff_date].copy()
-    
-    # 按日期排序（最舊的在前）
     df = df.sort_values('Analysis_Date', ascending=True).reset_index(drop=True)
-    
-    print(f"   📊 已載入 {len(df)} 筆近一年紀錄")
+
+    label = "近三個月" if days <= 93 else "近一年"
+    print(f"   📊 已載入 {len(df)} 筆{label}紀錄")
     if len(df) > 0:
         print(f"   📅 日期範圍: {df['Analysis_Date'].min()} 至 {df['Analysis_Date'].max()}")
-    
     return df
 
 def extract_numbers(row, is_fantasy=False):
@@ -323,64 +306,77 @@ def format_missed_dates(missed_dates):
     
     return ", ".join(formatted_dates)
 
-def generate_predictions(df, is_fantasy=False):
+def generate_predictions(df, is_fantasy=False, df_3m=None):
     """
-    生成所有時間段的預測
-    返回: DataFrame，包含各時間段的勝率前十名和槓龜日期
+    生成所有時間段的預測。539 與天天樂皆為：一年 + 近三個月雙欄，無槓龜欄位。
     """
-    print(f"   🔍 開始計算各時間段勝率...")
-    
-    # 根據彩球類型獲取對應的時間段
     time_windows = get_time_windows(is_fantasy)
-    
-    # 計算每個時間段的勝率前十名
+
+    if df_3m is not None:
+        print(f"   🔍 開始計算各時間段勝率（一年 + 近三個月）...")
+        window_results_year = {}
+        window_results_3m = {}
+        for window_name, window_days in time_windows.items():
+            print(f"      -> 計算 {window_name}（一年）...")
+            window_results_year[window_name] = calculate_window_win_rate(df, window_name, window_days, is_fantasy)
+            print(f"      -> 計算 {window_name}（三個月）...")
+            window_results_3m[window_name] = calculate_window_win_rate(df_3m, window_name, window_days, is_fantasy)
+        max_len = max(
+            max(len(window_results_year[w]) for w in time_windows),
+            max(len(window_results_3m[w]) for w in time_windows)
+        ) if time_windows else 0
+        columns = []
+        data_dict = {}
+        for window_name in time_windows.keys():
+            col_year = f"{window_name} 一年"
+            col_3m = f"{window_name} 三個月"
+            columns.append(col_year)
+            columns.append(col_3m)
+            data_dict[col_year] = []
+            data_dict[col_3m] = []
+        for i in range(max_len):
+            for window_name in time_windows.keys():
+                col_year = f"{window_name} 一年"
+                col_3m = f"{window_name} 三個月"
+                ry = window_results_year[window_name]
+                r3 = window_results_3m[window_name]
+                data_dict[col_year].append(format_combo_result(ry[i]) if i < len(ry) else "")
+                data_dict[col_3m].append(format_combo_result(r3[i]) if i < len(r3) else "")
+        result_df = pd.DataFrame({col: data_dict[col] for col in columns})
+        return result_df[columns]
+
+    print(f"   🔍 開始計算各時間段勝率...")
     window_results = {}
     for window_name, window_days in time_windows.items():
         print(f"      -> 計算 {window_name}...")
         results = calculate_window_win_rate(df, window_name, window_days, is_fantasy)
         window_results[window_name] = results
-    
-    # 構建輸出 DataFrame
-    # 找出最長的結果列表（最多10個）
     max_len = max(len(results) for results in window_results.values()) if window_results else 0
-    
-    # 動態創建輸出數據（根據時間段，每個時間段後面加一個槓龜欄位）
-    # 構建欄位順序和數據
     columns = []
     data_dict = {}
-    window_to_missed = {}  # 建立時間段名稱到槓龜欄位名稱的對應關係
-    
-    # 為每個時間段創建兩個欄位：時間段名稱和「槓龜1」、「槓龜2」等
+    window_to_missed = {}
     missed_counter = 1
     for window_name in time_windows.keys():
         columns.append(window_name)
         missed_col_name = f"槓龜{missed_counter}"
         columns.append(missed_col_name)
-        # 初始化數據列表
         data_dict[window_name] = []
         data_dict[missed_col_name] = []
-        # 記錄對應關係
         window_to_missed[window_name] = missed_col_name
         missed_counter += 1
-    
     for i in range(max_len):
         for window_name in time_windows.keys():
             missed_col_name = window_to_missed[window_name]
             if i < len(window_results[window_name]):
                 result = window_results[window_name][i]
                 data_dict[window_name].append(format_combo_result(result))
-                # 格式化槓龜日期（顯示所有日期）
                 missed_dates = result.get('missed_dates', [])
                 data_dict[missed_col_name].append(format_missed_dates(missed_dates))
             else:
                 data_dict[window_name].append("")
                 data_dict[missed_col_name].append("")
-    
-    # 創建 DataFrame
     result_df = pd.DataFrame({col: data_dict[col] for col in columns})
-    result_df = result_df[columns]  # 確保欄位順序正確
-    
-    return result_df
+    return result_df[columns]
 
 # ==========================================
 # Google Drive 上傳
@@ -643,15 +639,14 @@ def upload_to_drive(local_file, file_id=None, folder_id=None, creds_json=None):
 def process_single(name, input_file, output_file, is_fantasy, file_id=None, folder_id=None, creds=None):
     """處理單一彩球的分析"""
     print(f"\n⚡ 分析 {name} (轉換時區: {is_fantasy})...")
-    
-    # 載入資料（只保留最新365筆）
     df = load_data(input_file, is_fantasy)
     if df is None or len(df) == 0:
         print(f"❌ 找不到或無法讀取 {input_file}，跳過")
         return False
-    
-    # 生成預測
-    result_df = generate_predictions(df, is_fantasy)
+    df_3m = load_data(input_file, is_fantasy, recent_days=RECENT_MONTHS_539 * 30)
+    if df_3m is None or len(df_3m) == 0:
+        df_3m = None
+    result_df = generate_predictions(df, is_fantasy, df_3m=df_3m)
     
     # 輸出 XLSX
     try:
