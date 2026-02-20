@@ -42,10 +42,29 @@ def get_time_windows(is_fantasy=False):
 
 RECENT_YEARS = 1
 RECENT_MONTHS_539 = 3
+WIN_RATE_THRESHOLD_3M = 0.8
+TOP_N_3M = 10
 
 # ==========================================
 # 核心演算法
 # ==========================================
+
+def _get_week_unions(df, window_days, is_fantasy):
+    """回傳 (week_unions, total_weeks)。week_unions[(year,week)] = 該週時間段內開出號碼的 set。"""
+    window_data = df[df['Analysis_Date'].dt.weekday.isin(window_days)].copy()
+    if len(window_data) == 0:
+        return {}, 0
+    window_data['Numbers'] = window_data.apply(lambda row: extract_numbers(row, is_fantasy), axis=1)
+    window_data = window_data[window_data['Numbers'].notna()].copy()
+    window_data['YearWeek'] = window_data['Analysis_Date'].apply(lambda x: (x.isocalendar()[0], x.isocalendar()[1]))
+    week_unions = {}
+    for (year, week), group in window_data.groupby('YearWeek'):
+        union_set = set()
+        for nums in group['Numbers']:
+            if nums:
+                union_set.update(nums)
+        week_unions[(year, week)] = union_set
+    return week_unions, len(week_unions)
 
 def load_data(file_path, is_fantasy=False, recent_days=None):
     """讀取資料並處理時區。recent_days: 保留最近 N 天，None 表示一年。"""
@@ -290,6 +309,65 @@ def remove_duplicate_two_ball_combos(results):
     
     return final_results
 
+def calculate_window_win_rate_one(df, window_name, window_days, is_fantasy=False):
+    """近三個月用：單顆號碼勝率，回傳依勝率排序的 1~max_num 列表。"""
+    week_unions, total_weeks = _get_week_unions(df, window_days, is_fantasy)
+    if total_weeks == 0:
+        return []
+    max_num = 39
+    results = []
+    for num in range(1, max_num + 1):
+        wins = sum(1 for u in week_unions.values() if num in u)
+        results.append({
+            'combo': (num,),
+            'win_rate': wins / total_weeks,
+            'wins': wins,
+            'total': total_weeks
+        })
+    results.sort(key=lambda x: x['win_rate'], reverse=True)
+    return results
+
+def calculate_window_win_rate_two(df, window_name, window_days, is_fantasy=False):
+    """近三個月用：兩顆號碼勝率，回傳依勝率排序的兩碼組合列表。"""
+    week_unions, total_weeks = _get_week_unions(df, window_days, is_fantasy)
+    if total_weeks == 0:
+        return []
+    max_num = 39
+    all_twos = list(combinations(range(1, max_num + 1), 2))
+    results = []
+    for combo in all_twos:
+        combo_set = set(combo)
+        wins = sum(1 for u in week_unions.values() if not combo_set.isdisjoint(u))
+        results.append({
+            'combo': combo,
+            'win_rate': wins / total_weeks,
+            'wins': wins,
+            'total': total_weeks
+        })
+    results.sort(key=lambda x: x['win_rate'], reverse=True)
+    return results
+
+def build_three_month_entries(single_results, two_results, threshold=WIN_RATE_THRESHOLD_3M, top_n=TOP_N_3M):
+    """從單顆與雙顆勝率組出 top_n 筆：單顆>=threshold 用單顆，否則用雙顆遞補。"""
+    entries = []
+    i_s, i_t = 0, 0
+    single_n = len(single_results)
+    two_n = len(two_results)
+    while len(entries) < top_n:
+        if i_s < single_n and single_results[i_s]['win_rate'] >= threshold:
+            entries.append(single_results[i_s])
+            i_s += 1
+        elif i_t < two_n:
+            entries.append(two_results[i_t])
+            i_t += 1
+        else:
+            if i_s < single_n:
+                entries.append(single_results[i_s])
+                i_s += 1
+            else:
+                break
+    return entries[:top_n]
+
 def format_combo_result(result):
     """格式化組合結果"""
     combo_str = ",".join(f"{x:02d}" for x in result['combo'])
@@ -317,10 +395,12 @@ def generate_predictions(df, is_fantasy=False, df_3m=None):
         window_results_year = {}
         window_results_3m = {}
         for window_name, window_days in time_windows.items():
-            print(f"      -> 計算 {window_name}（一年）...")
+            print(f"      -> 計算 {window_name}（一年，三碼）...")
             window_results_year[window_name] = calculate_window_win_rate(df, window_name, window_days, is_fantasy)
-            print(f"      -> 計算 {window_name}（三個月）...")
-            window_results_3m[window_name] = calculate_window_win_rate(df_3m, window_name, window_days, is_fantasy)
+            print(f"      -> 計算 {window_name}（三個月，一碼/二碼）...")
+            single_3m = calculate_window_win_rate_one(df_3m, window_name, window_days, is_fantasy)
+            two_3m = calculate_window_win_rate_two(df_3m, window_name, window_days, is_fantasy)
+            window_results_3m[window_name] = build_three_month_entries(single_3m, two_3m)
         max_len = max(
             max(len(window_results_year[w]) for w in time_windows),
             max(len(window_results_3m[w]) for w in time_windows)
