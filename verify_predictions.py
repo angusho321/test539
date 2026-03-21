@@ -194,7 +194,7 @@ def verify_predictions(prediction_log_file="prediction_log.xlsx",
         
         # 驗證各策略的預測結果 - 支援簡化後的欄位格式
         # 檢查所有可能的策略欄位
-        strategy_columns = [col for col in row.index if any(keyword in col for keyword in ['智能選號', '平衡策略', '隨機選號', '熱號優先', '冷號優先', '未開組合', '融合策略', '趨勢適應'])]
+        strategy_columns = [col for col in row.index if any(keyword in col for keyword in ['智能選號', 'EV策略', '平衡策略', '隨機選號', '熱號優先', '冷號優先', '未開組合', '融合策略', '趨勢適應'])]
         verification_results = []
         max_matches = 0
         best_strategy = ""

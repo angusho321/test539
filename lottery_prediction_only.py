@@ -17,6 +17,12 @@ from itertools import combinations
 # 設定日誌
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+EV_LOOKBACK_DAYS = 240
+EV_DECAY = 0.99
+EV_W_MOMENTUM = 1.5
+EV_MOMENTUM_K = 7
+EV_W_OVERDUE = 0.0
+EV_W_WEEKDAY = 0.2
 
 # 從原本的 lottery_analysis.py 複製核心函數
 def load_lottery_excel(excel_path: str):
@@ -357,6 +363,60 @@ def select_top_weighted_numbers(nine_numbers, df, n=7):
     return sorted(nine_numbers[:n])
 
 
+def _build_ev_scores(df, target_date):
+    train_df = df[(df['日期'] < target_date) & (df['日期'] >= target_date - pd.Timedelta(days=EV_LOOKBACK_DAYS))]
+    if len(train_df) == 0:
+        train_df = df[df['日期'] < target_date].copy()
+    if len(train_df) == 0:
+        return np.zeros(40, dtype=float)
+    scores = np.zeros(40, dtype=float)
+    days_ago = (target_date - train_df['日期']).dt.days.clip(lower=0).to_numpy()
+    row_weights = np.power(EV_DECAY, days_ago)
+    draw_matrix = train_df[['號碼1', '號碼2', '號碼3', '號碼4', '號碼5']].to_numpy(dtype=int)
+    for i in range(draw_matrix.shape[0]):
+        w = row_weights[i]
+        for num in draw_matrix[i]:
+            scores[num] += w
+    if EV_W_MOMENTUM > 0:
+        recent = train_df.tail(EV_MOMENTUM_K)[['號碼1', '號碼2', '號碼3', '號碼4', '號碼5']].to_numpy(dtype=int)
+        if len(recent) > 0:
+            momentum = np.zeros(40, dtype=float)
+            for row in recent:
+                for num in row:
+                    momentum[num] += 1.0
+            scores += EV_W_MOMENTUM * (momentum / len(recent))
+    if EV_W_OVERDUE > 0:
+        last_seen = np.full(40, -1, dtype=int)
+        for i in range(draw_matrix.shape[0]):
+            for num in draw_matrix[i]:
+                last_seen[num] = i
+        overdue = np.zeros(40, dtype=float)
+        end = len(draw_matrix) - 1
+        for num in range(1, 40):
+            overdue[num] = min(60, end - last_seen[num]) if last_seen[num] >= 0 else 60
+        overdue = overdue / max(1.0, overdue[1:].max())
+        scores += EV_W_OVERDUE * overdue
+    if EV_W_WEEKDAY > 0:
+        wd = int(target_date.weekday())
+        wd_df = train_df[train_df['日期'].dt.weekday == wd]
+        if len(wd_df) > 0:
+            wd_scores = np.zeros(40, dtype=float)
+            wd_draws = wd_df[['號碼1', '號碼2', '號碼3', '號碼4', '號碼5']].to_numpy(dtype=int)
+            for row in wd_draws:
+                for num in row:
+                    wd_scores[num] += 1.0
+            wd_scores = wd_scores / len(wd_df)
+            scores += EV_W_WEEKDAY * wd_scores
+    scores[0] = -1e9
+    return scores
+
+
+def suggest_ev_numbers(df, n, target_date):
+    scores = _build_ev_scores(df, target_date)
+    selected = np.argsort(scores)[::-1][:n]
+    return sorted(int(x) for x in selected.tolist())
+
+
 def log_predictions_to_excel(predictions, log_file="prediction_log.xlsx"):
     """記錄預測結果 (僅預測版本)"""
     current_time = datetime.now()
@@ -369,10 +429,10 @@ def log_predictions_to_excel(predictions, log_file="prediction_log.xlsx"):
         '時間': time_str,
         '智能選號_九顆': str(predictions.get('smart_9', [])),
         '智能選號_七顆': str(predictions.get('smart_7', [])),
-        '平衡策略_九顆': str(predictions.get('balanced_9', [])),
-        '平衡策略_七顆': str(predictions.get('balanced_7', [])),
+        'EV策略_九顆': str(predictions.get('ev_9', [])),
+        'EV策略_七顆': str(predictions.get('ev_7', [])),
         '中獎號碼數': '',  # 留空，等待驗證
-        '備註': f"高機率特徵策略(6大規則) - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}",
+        '備註': f"539智能+EV對照策略 - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}",
         '驗證結果': ''  # 留空，等待驗證
     }
     
@@ -398,7 +458,7 @@ def log_predictions_to_excel(predictions, log_file="prediction_log.xlsx"):
                 if pd.notna(old_record.get('驗證結果', '')) and old_record.get('驗證結果', '') != '':
                     log_data['驗證結果'] = old_record['驗證結果']
                     log_data['中獎號碼數'] = old_record['中獎號碼數']
-                    log_data['備註'] = f"相同時間更新（保留驗證結果） - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}"
+                    log_data['備註'] = f"539智能+EV對照策略（保留驗證結果） - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}"
                     logger.info("🔄 更新相同日期時間記錄，保留已驗證結果")
                 else:
                     logger.info("🔄 更新相同日期時間記錄")
@@ -512,25 +572,26 @@ def main():
         logger.info(f"   6. 特殊尾數: 1, 4, 7")
         logger.info("="*60)
         
-        # 生成九顆策略（帶高機率特徵過濾）
+        # 生成智能九顆策略（帶高機率特徵過濾）
         smart_9 = suggest_numbers('smart', n=9, df=df, randomness_factor=randomness_factor,
                                  use_high_prob=use_high_prob, target_weekday=today_weekday)
-        balanced_9 = suggest_numbers('balanced', n=9, df=df, randomness_factor=randomness_factor)
+        # 生成EV九顆策略（近一年回測最佳參數）
+        ev_9 = suggest_ev_numbers(df, n=9, target_date=datetime.now())
         
-        # 生成七顆策略（基於九顆選號）
+        # 生成七顆策略（智能由智能九顆衍生，EV獨立選號）
         smart_7 = select_top_weighted_numbers(smart_9, df, n=7)
-        balanced_7 = select_top_weighted_numbers(balanced_9, df, n=7)
+        ev_7 = suggest_ev_numbers(df, n=7, target_date=datetime.now())
         
         # 儲存結果
         predictions['smart_9'] = smart_9
         predictions['smart_7'] = smart_7
-        predictions['balanced_9'] = balanced_9
-        predictions['balanced_7'] = balanced_7
+        predictions['ev_9'] = ev_9
+        predictions['ev_7'] = ev_7
         
         logger.info(f"📋 智能選號_九顆: {smart_9}")
         logger.info(f"📋 智能選號_七顆: {smart_7}")
-        logger.info(f"📋 平衡策略_九顆: {balanced_9}")
-        logger.info(f"📋 平衡策略_七顆: {balanced_7}")
+        logger.info(f"📋 EV策略_九顆: {ev_9}")
+        logger.info(f"📋 EV策略_七顆: {ev_7}")
         
         # 記錄預測結果
         success = log_predictions_to_excel(predictions, "prediction_log.xlsx")

@@ -123,7 +123,7 @@ jobs:
       run: python verify_predictions.py
       
     # 步驟 3: 預測今日的號碼（週日跳過）
-    - name: 📊 Generate today's predictions
+    - name: 📊 Generate today's Smart+EV predictions
       if: steps.check_sunday.outputs.is_sunday != 'true'
       run: python lottery_prediction_only.py
     
