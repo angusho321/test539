@@ -6,13 +6,11 @@
 
 import pandas as pd
 import numpy as np
-import random
 from pathlib import Path
 from datetime import datetime
 import os
 import logging
 from collections import defaultdict
-from itertools import combinations
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -32,6 +30,12 @@ WEEKDAY_STRONG_NUMBERS = {
 }
 
 SPECIAL_TAIL_NUMBERS = [9, 3, 7]  # 強勢尾數
+EV_LOOKBACK_DAYS = 150
+EV_DECAY = 0.98
+EV_W_WEEKDAY = 0.0
+EV_W_MOMENTUM = 1.0
+EV_MOMENTUM_K = 7
+EV_W_OVERDUE = 0.4
 
 # 從原本的 lottery_analysis.py 複製核心函數
 def load_lottery_excel(excel_path: str):
@@ -209,119 +213,82 @@ def calculate_score(numbers, hot_numbers, weekday_strong_numbers, special_tail_n
     return True, score
 
 
-def suggest_numbers(strategy='smart', n=9, historical_stats=None, df=None, randomness_factor=0.3, 
-                   target_weekday=None):
-    """產生建議號碼 (加州Fantasy 5版本 - 高機率特徵策略)"""
-    numbers = list(range(1, 40))  # Fantasy 5也是1-39
+def _number_frequency_scores(df, decay=EV_DECAY, lookback_days=EV_LOOKBACK_DAYS):
+    scores = np.zeros(40, dtype=float)
+    max_date = df['日期'].max()
+    cutoff_date = max_date - pd.Timedelta(days=lookback_days)
+    recent_df = df[df['日期'] >= cutoff_date].copy()
+    if len(recent_df) == 0:
+        recent_df = df.copy()
+    days_ago = (max_date - recent_df['日期']).dt.days.clip(lower=0).to_numpy()
+    row_weights = np.power(decay, days_ago)
+    draw_matrix = recent_df[['號碼1', '號碼2', '號碼3', '號碼4', '號碼5']].to_numpy(dtype=int)
+    for row_idx in range(draw_matrix.shape[0]):
+        w = row_weights[row_idx]
+        for num in draw_matrix[row_idx]:
+            scores[num] += w
+    scores[0] = -1e9
+    return scores
 
-    if strategy == 'smart':
-        # 高機率特徵策略：時間加權 + 6大規則過濾
-        if df is not None:
-            try:
-                weighted_freq = compute_weighted_frequency(df)
-                if weighted_freq:
-                    # 決定是否要求連號（35%機率，基於歷史39%）
-                    require_consecutive = random.random() < 0.35
-                    
-                    best_numbers = None
-                    best_score = -1
-                    
-                    # 嘗試多次直到找到符合所有過濾的組合
-                    for attempt in range(500):
-                        # 根據加權頻率選號
-                        weights = [weighted_freq.get(num, 0.001) for num in numbers]
-                        
-                        # 加入隨機性
-                        adjusted_weights = []
-                        for w in weights:
-                            adjusted_weights.append(w * (1 - randomness_factor) + random.random() * randomness_factor)
-                        
-                        # 對熱門號加權 ×1.3
-                        for i, num in enumerate(numbers):
-                            if num in HOT_NUMBERS:
-                                adjusted_weights[i] *= 1.3
-                        
-                        # 對星期強勢號加權 ×1.2
-                        if target_weekday is not None:
-                            strong_nums = WEEKDAY_STRONG_NUMBERS.get(target_weekday, [])
-                            for i, num in enumerate(numbers):
-                                if num in strong_nums:
-                                    adjusted_weights[i] *= 1.2
-                        
-                        # 對特殊尾數加權 ×1.1
-                        for i, num in enumerate(numbers):
-                            if (num % 10) in SPECIAL_TAIL_NUMBERS:
-                                adjusted_weights[i] *= 1.1
-                        
-                        # 正規化權重
-                        total = sum(adjusted_weights)
-                        if total > 0:
-                            adjusted_weights = [w / total for w in adjusted_weights]
-                        
-                        # 根據權重選號
-                        try:
-                            selected = np.random.choice(numbers, size=n, replace=False, p=adjusted_weights)
-                            candidate = sorted([int(x) for x in selected])
-                        except:
-                            candidate = sorted(random.sample(numbers, n))
-                        
-                        # 計算評分
-                        valid, score = calculate_score(
-                            candidate, HOT_NUMBERS, WEEKDAY_STRONG_NUMBERS, 
-                            SPECIAL_TAIL_NUMBERS, target_weekday, require_consecutive
-                        )
-                        
-                        if not valid:
-                            continue
-                        
-                        # 更新最佳組合
-                        if score > best_score:
-                            best_score = score
-                            best_numbers = candidate
-                            
-                            # 如果分數夠高，提前返回
-                            if score >= 70:
-                                sum_val = sum(sorted(best_numbers)[:5])
-                                logger.info(f"🎯 高機率特徵選號 (分數:{best_score}, 和值:{sum_val}): {best_numbers}")
-                                return best_numbers
-                    
-                    # 如果找到有效組合，返回最佳組合
-                    if best_numbers is not None:
-                        sum_val = sum(sorted(best_numbers)[:5])
-                        logger.info(f"🎯 高機率特徵選號 (分數:{best_score}, 和值:{sum_val}): {best_numbers}")
-                        return best_numbers
-                    
-                    # 如果所有嘗試都失敗，使用原始方法
-                    logger.warning(f"⚠️ 500次嘗試後仍無有效組合，使用時間加權選號")
-            except Exception as e:
-                logger.warning(f"⚠️ 高機率特徵選號失敗，使用時間加權選號: {e}")
-        
-        # 備用方案：原始時間加權選號
-        if df is not None:
-            try:
-                weighted_freq = compute_weighted_frequency(df)
-                if weighted_freq:
-                    weights = [weighted_freq.get(num, 0.001) for num in numbers]
-                    for i in range(len(weights)):
-                        weights[i] = weights[i] * (1 - randomness_factor) + random.random() * randomness_factor
-                    weights = np.array(weights)
-                    weights = weights / weights.sum()
-                    selected = np.random.choice(numbers, size=n, replace=False, p=weights)
-                    result = sorted([int(x) for x in selected.tolist()])
-                    logger.info(f"🧠 時間加權智能選號 (隨機因子:{randomness_factor}): {result}")
-                    return result
-            except Exception as e:
-                logger.warning(f"⚠️ 時間加權選號失敗，使用隨機選號: {e}")
-        
-        return sorted(random.sample(numbers, n))
-    elif strategy == 'balanced':
-        # 平衡策略：純隨機選號
-        result = sorted(random.sample(numbers, n))
-        logger.info(f"⚖️ 平衡策略 (隨機因子:{randomness_factor}): {result}")
-        return result
-    else:
-        # 其他策略暫不使用
-        return sorted(random.sample(numbers, n))
+
+def _weekday_scores(df, weekday):
+    scores = np.zeros(40, dtype=float)
+    sub = df[df['日期'].dt.weekday == weekday]
+    if len(sub) == 0:
+        scores[0] = -1e9
+        return scores
+    draw_matrix = sub[['號碼1', '號碼2', '號碼3', '號碼4', '號碼5']].to_numpy(dtype=int)
+    for row in draw_matrix:
+        for num in row:
+            scores[num] += 1.0
+    scores = scores / len(sub)
+    scores[0] = -1e9
+    return scores
+
+
+def _momentum_scores(df, k=EV_MOMENTUM_K):
+    scores = np.zeros(40, dtype=float)
+    sub = df.tail(k)
+    if len(sub) == 0:
+        scores[0] = -1e9
+        return scores
+    draw_matrix = sub[['號碼1', '號碼2', '號碼3', '號碼4', '號碼5']].to_numpy(dtype=int)
+    for row in draw_matrix:
+        for num in row:
+            scores[num] += 1.0
+    scores = scores / len(sub)
+    scores[0] = -1e9
+    return scores
+
+
+def _overdue_scores(df, cap=60):
+    scores = np.zeros(40, dtype=float)
+    draw_matrix = df[['號碼1', '號碼2', '號碼3', '號碼4', '號碼5']].to_numpy(dtype=int)
+    last_seen = np.full(40, -1, dtype=int)
+    for i in range(draw_matrix.shape[0]):
+        for num in draw_matrix[i]:
+            last_seen[num] = i
+    end = len(draw_matrix) - 1
+    for num in range(1, 40):
+        if last_seen[num] < 0:
+            dist = cap
+        else:
+            dist = min(cap, end - last_seen[num])
+        scores[num] = float(dist)
+    max_score = max(1.0, scores[1:].max())
+    scores = scores / max_score
+    scores[0] = -1e9
+    return scores
+
+
+def suggest_ev_numbers(df, n, target_weekday):
+    base = _number_frequency_scores(df, decay=EV_DECAY, lookback_days=EV_LOOKBACK_DAYS)
+    weekday = _weekday_scores(df, target_weekday)
+    momentum = _momentum_scores(df, k=EV_MOMENTUM_K)
+    overdue = _overdue_scores(df)
+    final_scores = base + (EV_W_WEEKDAY * weekday) + (EV_W_MOMENTUM * momentum) + (EV_W_OVERDUE * overdue)
+    picked = np.argsort(final_scores)[::-1][:n]
+    return sorted(int(x) for x in picked)
 
 
 def select_top_weighted_numbers(nine_numbers, df, n=7):
@@ -365,12 +332,10 @@ def log_predictions_to_excel(predictions, log_file="fantasy5_prediction_log.xlsx
     log_data = {
         '日期': date_str,
         '時間': time_str,
-        '智能選號_九顆': str(predictions.get('smart_9', [])),
-        '智能選號_七顆': str(predictions.get('smart_7', [])),
-        '平衡策略_九顆': str(predictions.get('balanced_9', [])),
-        '平衡策略_七顆': str(predictions.get('balanced_7', [])),
+        'EV策略_九顆': str(predictions.get('ev_9', [])),
+        'EV策略_七顆': str(predictions.get('ev_7', [])),
         '中獎號碼數': '',  # 留空，等待驗證
-        '備註': f"加州Fantasy 5高機率特徵策略(6大規則) - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}",
+        '備註': f"加州Fantasy 5 EV策略(近一年參數) - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}",
         '驗證結果': ''  # 留空，等待驗證
     }
     
@@ -396,7 +361,7 @@ def log_predictions_to_excel(predictions, log_file="fantasy5_prediction_log.xlsx
                 if pd.notna(old_record.get('驗證結果', '')) and old_record.get('驗證結果', '') != '':
                     log_data['驗證結果'] = old_record['驗證結果']
                     log_data['中獎號碼數'] = old_record['中獎號碼數']
-                    log_data['備註'] = f"加州Fantasy 5高機率特徵策略(6大規則) - 相同時間更新（保留驗證結果） - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}"
+                    log_data['備註'] = f"加州Fantasy 5 EV策略(近一年參數) - 相同時間更新（保留驗證結果） - {os.environ.get('GITHUB_WORKFLOW', 'Unknown')}"
                     logger.info("🔄 更新相同日期時間記錄，保留已驗證結果")
                 else:
                     logger.info("🔄 更新相同日期時間記錄")
@@ -488,40 +453,27 @@ def main():
         df = load_lottery_excel(excel_file)
         logger.info(f"📊 成功載入 {len(df)} 筆加州Fantasy 5歷史資料")
         
-        # 使用最佳隨機因子 0.3
-        randomness_factor = 0.3
         predictions = {}
         
-        logger.info("🎯 使用高機率特徵策略 (6大規則)")
-        logger.info("   1. 熱門號: 33, 10, 32, 39, 11, 14, 6, 20, 17, 25")
-        logger.info("   2. 和值範圍: 86-118")
-        logger.info("   3. 奇偶比例: 3:2 或 2:3")
-        logger.info("   4. 星期效應: 已啟用")
-        logger.info("   5. 連號機率: 35%")
-        logger.info("   6. 特殊尾數: 9, 3, 7")
+        logger.info("🎯 使用EV策略（近一年資料調參）")
+        logger.info(f"   lookback={EV_LOOKBACK_DAYS}, decay={EV_DECAY}")
+        logger.info(f"   weekday={EV_W_WEEKDAY}, momentum={EV_W_MOMENTUM}, overdue={EV_W_OVERDUE}")
         logger.info("="*60)
         
         # 獲取今天星期
         today_weekday = datetime.now().weekday()
         
-        # 生成九顆策略
-        smart_9 = suggest_numbers('smart', n=9, df=df, randomness_factor=randomness_factor, target_weekday=today_weekday)
-        balanced_9 = suggest_numbers('balanced', n=9, df=df, randomness_factor=randomness_factor)
+        ev_9 = suggest_ev_numbers(df, n=9, target_weekday=today_weekday)
         
-        # 生成七顆策略（基於九顆選號）
-        smart_7 = select_top_weighted_numbers(smart_9, df, n=7)
-        balanced_7 = select_top_weighted_numbers(balanced_9, df, n=7)
+        # 生成七顆策略（獨立選號，不再使用平衡策略）
+        ev_7 = suggest_ev_numbers(df, n=7, target_weekday=today_weekday)
         
         # 儲存結果
-        predictions['smart_9'] = smart_9
-        predictions['smart_7'] = smart_7
-        predictions['balanced_9'] = balanced_9
-        predictions['balanced_7'] = balanced_7
+        predictions['ev_9'] = ev_9
+        predictions['ev_7'] = ev_7
         
-        logger.info(f"📋 智能選號_九顆: {smart_9}")
-        logger.info(f"📋 智能選號_七顆: {smart_7}")
-        logger.info(f"📋 平衡策略_九顆: {balanced_9}")
-        logger.info(f"📋 平衡策略_七顆: {balanced_7}")
+        logger.info(f"📋 EV策略_九顆: {ev_9}")
+        logger.info(f"📋 EV策略_七顆: {ev_7}")
         
         # 記錄預測結果
         success = log_predictions_to_excel(predictions, "fantasy5_prediction_log.xlsx")

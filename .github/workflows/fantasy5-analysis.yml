@@ -103,7 +103,7 @@ jobs:
     - name: 🔍 Verify yesterday's Fantasy 5 predictions
       run: python verify_fantasy5_predictions.py
       
-    - name: 📊 Generate today's Fantasy 5 predictions
+    - name: 📊 Generate today's Fantasy 5 EV predictions
       run: python fantasy5_prediction_only.py
 
     # ========================================================
