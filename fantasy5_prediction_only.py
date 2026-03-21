@@ -291,6 +291,22 @@ def suggest_ev_numbers(df, n, target_weekday):
     return sorted(int(x) for x in picked)
 
 
+def suggest_smart_numbers(df, n, randomness_factor=0.3):
+    numbers = list(range(1, 40))
+    weighted_freq = compute_weighted_frequency(df)
+    if not weighted_freq:
+        return sorted(np.random.choice(numbers, size=n, replace=False).tolist())
+    weights = np.array([weighted_freq.get(num, 0.001) for num in numbers], dtype=float)
+    noise = np.random.random(len(numbers))
+    weights = weights * (1 - randomness_factor) + noise * randomness_factor
+    total = weights.sum()
+    if total <= 0:
+        return sorted(np.random.choice(numbers, size=n, replace=False).tolist())
+    weights = weights / total
+    selected = np.random.choice(numbers, size=n, replace=False, p=weights)
+    return sorted(int(x) for x in selected.tolist())
+
+
 def select_top_weighted_numbers(nine_numbers, df, n=7):
     """
     從九顆號碼中選取加權最高的七顆
@@ -332,6 +348,8 @@ def log_predictions_to_excel(predictions, log_file="fantasy5_prediction_log.xlsx
     log_data = {
         '日期': date_str,
         '時間': time_str,
+        '智能選號_九顆': str(predictions.get('smart_9', [])),
+        '智能選號_七顆': str(predictions.get('smart_7', [])),
         'EV策略_九顆': str(predictions.get('ev_9', [])),
         'EV策略_七顆': str(predictions.get('ev_7', [])),
         '中獎號碼數': '',  # 留空，等待驗證
@@ -458,20 +476,27 @@ def main():
         logger.info("🎯 使用EV策略（近一年資料調參）")
         logger.info(f"   lookback={EV_LOOKBACK_DAYS}, decay={EV_DECAY}")
         logger.info(f"   weekday={EV_W_WEEKDAY}, momentum={EV_W_MOMENTUM}, overdue={EV_W_OVERDUE}")
+        logger.info("🧠 同步保留智能選號策略（作為A/B對照）")
         logger.info("="*60)
         
         # 獲取今天星期
         today_weekday = datetime.now().weekday()
         
+        smart_9 = suggest_smart_numbers(df, n=9, randomness_factor=0.3)
         ev_9 = suggest_ev_numbers(df, n=9, target_weekday=today_weekday)
         
-        # 生成七顆策略（獨立選號，不再使用平衡策略）
+        # 生成七顆策略（保留智能 + EV，不使用平衡策略）
+        smart_7 = select_top_weighted_numbers(smart_9, df, n=7)
         ev_7 = suggest_ev_numbers(df, n=7, target_weekday=today_weekday)
         
         # 儲存結果
+        predictions['smart_9'] = smart_9
+        predictions['smart_7'] = smart_7
         predictions['ev_9'] = ev_9
         predictions['ev_7'] = ev_7
         
+        logger.info(f"📋 智能選號_九顆: {smart_9}")
+        logger.info(f"📋 智能選號_七顆: {smart_7}")
         logger.info(f"📋 EV策略_九顆: {ev_9}")
         logger.info(f"📋 EV策略_七顆: {ev_7}")
         
