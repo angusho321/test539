@@ -2,6 +2,9 @@ import pandas as pd
 import numpy as np
 from itertools import combinations
 from collections import defaultdict
+import heapq
+from concurrent.futures import ProcessPoolExecutor
+import multiprocessing
 import datetime
 import os
 import json
@@ -44,6 +47,8 @@ RECENT_YEARS = 1
 RECENT_MONTHS_539 = 3
 WIN_RATE_THRESHOLD_3M = 0.8
 TOP_N_3M = 10
+TOP_N_6NUM = 10
+HALF_YEAR_DAYS = 183
 
 # ==========================================
 # 核心演算法
@@ -368,6 +373,246 @@ def build_three_month_entries(single_results, two_results, threshold=WIN_RATE_TH
                 break
     return entries[:top_n]
 
+def _build_week_day_sets(df, window_days, is_fantasy=False):
+    """回傳指定時段每週內各日號碼集合（list[list[set]]）。"""
+    window_data = df[df['Analysis_Date'].dt.weekday.isin(window_days)].copy()
+    if len(window_data) == 0:
+        return []
+    window_data['Numbers'] = window_data.apply(lambda row: extract_numbers(row, is_fantasy), axis=1)
+    window_data = window_data[window_data['Numbers'].notna()].copy()
+    window_data['YearWeek'] = window_data['Analysis_Date'].apply(lambda x: (x.isocalendar()[0], x.isocalendar()[1]))
+    week_blocks = []
+    for _, group in window_data.groupby('YearWeek'):
+        day_sets = [set(nums) for nums in group['Numbers'] if nums]
+        if day_sets:
+            week_blocks.append(day_sets)
+    return week_blocks
+
+def _find_guaranteed_six_combos(week_blocks, top_n=TOP_N_6NUM, need_hits=2):
+    """
+    搜尋固定六碼且每週至少命中 need_hits 的組合。
+    使用剪枝 DFS，優先找出可行組合。
+    """
+    if not week_blocks:
+        return []
+    numbers = list(range(1, 40))
+    ordered = sorted(
+        numbers,
+        key=lambda n: sum(1 for days in week_blocks if any(n in day_set for day_set in days)),
+        reverse=True
+    )
+    w_count = len(week_blocks)
+
+    suffix_cover = [[0] * w_count for _ in range(len(ordered) + 1)]
+    for i in range(len(ordered) - 1, -1, -1):
+        n = ordered[i]
+        prev = suffix_cover[i + 1]
+        curr = suffix_cover[i]
+        for w in range(w_count):
+            curr[w] = prev[w] + (1 if any(n in day_set for day_set in week_blocks[w]) else 0)
+
+    found = []
+    found_set = set()
+
+    def dfs(idx, selected, hit_counts):
+        if len(found) >= top_n:
+            return
+        remain_slots = 6 - len(selected)
+
+        for w in range(w_count):
+            max_add = suffix_cover[idx][w] if idx < len(ordered) else 0
+            if hit_counts[w] + min(max_add, remain_slots) < need_hits:
+                return
+
+        if len(selected) == 6:
+            key = tuple(sorted(selected))
+            if key not in found_set:
+                found_set.add(key)
+                found.append(key)
+            return
+
+        if idx >= len(ordered) or len(ordered) - idx < remain_slots:
+            return
+
+        n = ordered[idx]
+        next_counts = hit_counts[:]
+        for w in range(w_count):
+            if any(n in day_set for day_set in week_blocks[w]):
+                next_counts[w] += 1
+        dfs(idx + 1, selected + [n], next_counts)
+        dfs(idx + 1, selected, hit_counts)
+
+    dfs(0, [], [0] * w_count)
+    return found
+
+def _evaluate_six_combo(combo, week_blocks):
+    combo_set = set(combo)
+    week_best_hits = []
+    for days in week_blocks:
+        best_day_hit = max(len(combo_set.intersection(day_set)) for day_set in days)
+        week_best_hits.append(best_day_hit)
+    hits = week_best_hits
+    total = len(hits)
+    if total == 0:
+        return {'combo': tuple(sorted(combo)), 'win_rate': 0.0, 'wins': 0, 'total': 0}
+    wins = sum(1 for h in hits if h >= 2)
+    avg_hit = sum(hits) / total
+    return {
+        'combo': tuple(sorted(combo)),
+        'win_rate': wins / total,
+        'wins': wins,
+        'total': total,
+        'avg_hit': avg_hit,
+        'min_hit': min(hits),
+    }
+
+def _push_top_n(heap, item, top_n):
+    """維持固定容量的最優前 N 筆（依 wins, avg_hit 排序）。"""
+    key = (item['wins'], item['avg_hit'], item['combo'])
+    payload = (key, item)
+    if len(heap) < top_n:
+        heapq.heappush(heap, payload)
+    else:
+        if key > heap[0][0]:
+            heapq.heapreplace(heap, payload)
+
+def _merge_top_items(items, top_n):
+    heap = []
+    for item in items:
+        _push_top_n(heap, item, top_n)
+    merged = [x[1] for x in heap]
+    merged.sort(key=lambda x: (x['win_rate'], x['avg_hit'], x['wins']), reverse=True)
+    return merged
+
+def _scan_six_combo_worker(args):
+    """
+    掃描固定第一顆號碼的所有六碼組合。
+    回傳：processed_count, guaranteed_items, fallback_items
+    """
+    first_num, week_day_masks, top_n = args
+    total_weeks = len(week_day_masks)
+    guaranteed_heap = []
+    fallback_heap = []
+    processed = 0
+
+    for b in range(first_num + 1, 40):
+        for c in range(b + 1, 40):
+            for d in range(c + 1, 40):
+                for e in range(d + 1, 40):
+                    for f in range(e + 1, 40):
+                        combo = (first_num, b, c, d, e, f)
+                        combo_mask = 0
+                        for n in combo:
+                            combo_mask |= (1 << n)
+
+                        wins = 0
+                        hit_sum = 0
+                        min_hit = 99
+                        for day_masks in week_day_masks:
+                            best_hit = 0
+                            for dm in day_masks:
+                                h = (combo_mask & dm).bit_count()
+                                if h > best_hit:
+                                    best_hit = h
+                            hit_sum += best_hit
+                            if best_hit < min_hit:
+                                min_hit = best_hit
+                            if best_hit >= 2:
+                                wins += 1
+
+                        item = {
+                            'combo': combo,
+                            'win_rate': wins / total_weeks,
+                            'wins': wins,
+                            'total': total_weeks,
+                            'avg_hit': hit_sum / total_weeks,
+                            'min_hit': min_hit,
+                        }
+                        if wins == total_weeks:
+                            _push_top_n(guaranteed_heap, item, top_n)
+                        else:
+                            _push_top_n(fallback_heap, item, top_n)
+                        processed += 1
+
+    guaranteed = [x[1] for x in guaranteed_heap]
+    fallback = [x[1] for x in fallback_heap]
+    return processed, guaranteed, fallback
+
+def _full_scan_top_six_entries(week_blocks, top_n=TOP_N_6NUM):
+    """
+    全量掃描 C(39,6) 組合，輸出：
+    1) 保證組前 N（每週三天內至少一天>=2）
+    2) 一般勝率前 N（供遞補）
+    """
+    if not week_blocks:
+        return [], []
+
+    week_day_masks = []
+    for days in week_blocks:
+        masks = []
+        for day_set in days:
+            m = 0
+            for n in day_set:
+                m |= (1 << int(n))
+            masks.append(m)
+        week_day_masks.append(masks)
+
+    first_nums = list(range(1, 35))  # 第一顆最大到34，確保後面還有5顆
+    tasks = [(x, week_day_masks, top_n) for x in first_nums]
+    worker_count = max(1, min(multiprocessing.cpu_count(), len(tasks)))
+
+    all_guaranteed = []
+    all_fallback = []
+    processed_total = 0
+
+    with ProcessPoolExecutor(max_workers=worker_count) as executor:
+        for processed, guaranteed_part, fallback_part in executor.map(_scan_six_combo_worker, tasks):
+            processed_total += processed
+            all_guaranteed.extend(guaranteed_part)
+            all_fallback.extend(fallback_part)
+
+    expected_total = 3262623
+    if processed_total != expected_total:
+        raise RuntimeError(f"six-combo scan mismatch: processed={processed_total}, expected={expected_total}")
+
+    guaranteed = _merge_top_items(all_guaranteed, top_n)
+    fallback = _merge_top_items(all_fallback, top_n)
+    return guaranteed, fallback
+
+def calculate_window_six_num_entries(df, window_days, is_fantasy=False, top_n=TOP_N_6NUM):
+    """
+    半年六碼策略：
+    1) 先放入「每週三天內至少一天>=2碼」保證組合
+    2) 若未滿 top_n，按勝率遞補
+    """
+    if len(df) == 0:
+        return []
+    max_date = df['Analysis_Date'].max()
+    cutoff = max_date - pd.Timedelta(days=HALF_YEAR_DAYS)
+    half_df = df[df['Analysis_Date'] >= cutoff].copy()
+    week_blocks = _build_week_day_sets(half_df, window_days, is_fantasy)
+    if not week_blocks:
+        return []
+
+    entries = []
+    used = set()
+
+    guaranteed_top, fallback_top = _full_scan_top_six_entries(week_blocks, top_n=top_n)
+
+    for item in guaranteed_top:
+        entries.append(item)
+        used.add(item['combo'])
+
+    for item in fallback_top:
+        if len(entries) >= top_n:
+            break
+        if item['combo'] in used:
+            continue
+        entries.append(item)
+        used.add(item['combo'])
+
+    return entries[:top_n]
+
 def format_combo_result(result):
     """格式化組合結果"""
     combo_str = ",".join(f"{x:02d}" for x in result['combo'])
@@ -394,6 +639,7 @@ def generate_predictions(df, is_fantasy=False, df_3m=None):
         print(f"   🔍 開始計算各時間段勝率（一年 + 近三個月）...")
         window_results_year = {}
         window_results_3m = {}
+        window_results_6num = {}
         for window_name, window_days in time_windows.items():
             print(f"      -> 計算 {window_name}（一年，三碼）...")
             window_results_year[window_name] = calculate_window_win_rate(df, window_name, window_days, is_fantasy)
@@ -401,9 +647,13 @@ def generate_predictions(df, is_fantasy=False, df_3m=None):
             single_3m = calculate_window_win_rate_one(df_3m, window_name, window_days, is_fantasy)
             two_3m = calculate_window_win_rate_two(df_3m, window_name, window_days, is_fantasy)
             window_results_3m[window_name] = build_three_month_entries(single_3m, two_3m)
+            if not is_fantasy:
+                print(f"      -> 計算 {window_name}（半年，三天內同日>=2保證+勝率遞補）...")
+                window_results_6num[window_name] = calculate_window_six_num_entries(df, window_days, is_fantasy, top_n=TOP_N_6NUM)
         max_len = max(
             max(len(window_results_year[w]) for w in time_windows),
-            max(len(window_results_3m[w]) for w in time_windows)
+            max(len(window_results_3m[w]) for w in time_windows),
+            max(len(window_results_6num.get(w, [])) for w in time_windows) if (not is_fantasy) else 0
         ) if time_windows else 0
         columns = []
         data_dict = {}
@@ -414,6 +664,10 @@ def generate_predictions(df, is_fantasy=False, df_3m=None):
             columns.append(col_3m)
             data_dict[col_year] = []
             data_dict[col_3m] = []
+            if not is_fantasy:
+                col_6m = f"{window_name} 半年六碼"
+                columns.append(col_6m)
+                data_dict[col_6m] = []
         for i in range(max_len):
             for window_name in time_windows.keys():
                 col_year = f"{window_name} 一年"
@@ -422,6 +676,10 @@ def generate_predictions(df, is_fantasy=False, df_3m=None):
                 r3 = window_results_3m[window_name]
                 data_dict[col_year].append(format_combo_result(ry[i]) if i < len(ry) else "")
                 data_dict[col_3m].append(format_combo_result(r3[i]) if i < len(r3) else "")
+                if not is_fantasy:
+                    col_6m = f"{window_name} 半年六碼"
+                    r6 = window_results_6num.get(window_name, [])
+                    data_dict[col_6m].append(format_combo_result(r6[i]) if i < len(r6) else "")
         result_df = pd.DataFrame({col: data_dict[col] for col in columns})
         return result_df[columns]
 
