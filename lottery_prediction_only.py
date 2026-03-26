@@ -23,6 +23,9 @@ EV_W_MOMENTUM = 1.5
 EV_MOMENTUM_K = 7
 EV_W_OVERDUE = 0.0
 EV_W_WEEKDAY = 0.2
+EV_W_PAIR = 0.3
+EV_W_REPEAT = 0.25
+EV_W_REGIME = 0.3
 
 # 從原本的 lottery_analysis.py 複製核心函數
 def load_lottery_excel(excel_path: str):
@@ -411,8 +414,87 @@ def _build_ev_scores(df, target_date):
     return scores
 
 
+def _normalize_scores(arr):
+    v = np.array(arr, dtype=float)
+    maxv = v.max() if v.size > 0 else 0.0
+    if maxv <= 0:
+        return np.zeros_like(v, dtype=float)
+    return v / maxv
+
+
+def _pair_boost(train_df):
+    scores = np.zeros(40, dtype=float)
+    if len(train_df) < 10:
+        return scores
+    draws = train_df[['號碼1', '號碼2', '號碼3', '號碼4', '號碼5']].to_numpy(dtype=int)
+    pair_counts = np.zeros((40, 40), dtype=float)
+    for row in draws:
+        r = sorted(int(x) for x in row)
+        for i in range(len(r)):
+            for j in range(i + 1, len(r)):
+                a, b = r[i], r[j]
+                pair_counts[a, b] += 1.0
+                pair_counts[b, a] += 1.0
+    for n in range(1, 40):
+        scores[n] = pair_counts[n].sum()
+    return _normalize_scores(scores)
+
+
+def _repeat_boost(train_df):
+    scores = np.zeros(40, dtype=float)
+    if len(train_df) < 2:
+        return scores
+    draws = train_df[['號碼1', '號碼2', '號碼3', '號碼4', '號碼5']].to_numpy(dtype=int)
+    overlap_count = np.zeros(40, dtype=float)
+    for i in range(1, len(draws)):
+        prev_set = set(int(x) for x in draws[i - 1])
+        curr = [int(x) for x in draws[i]]
+        for num in curr:
+            if num in prev_set:
+                overlap_count[num] += 1.0
+    return _normalize_scores(overlap_count)
+
+
+def _regime_boost(train_df, short_days=30, long_days=180):
+    scores = np.zeros(40, dtype=float)
+    if len(train_df) == 0:
+        return scores
+    end_date = train_df['日期'].max()
+    short_df = train_df[train_df['日期'] >= end_date - pd.Timedelta(days=short_days)]
+    long_df = train_df[train_df['日期'] >= end_date - pd.Timedelta(days=long_days)]
+    if len(short_df) == 0 or len(long_df) == 0:
+        return scores
+    short_freq = np.zeros(40, dtype=float)
+    long_freq = np.zeros(40, dtype=float)
+    for row in short_df[['號碼1', '號碼2', '號碼3', '號碼4', '號碼5']].to_numpy(dtype=int):
+        for n in row:
+            short_freq[int(n)] += 1.0
+    for row in long_df[['號碼1', '號碼2', '號碼3', '號碼4', '號碼5']].to_numpy(dtype=int):
+        for n in row:
+            long_freq[int(n)] += 1.0
+    short_freq = short_freq / max(1.0, len(short_df))
+    long_freq = long_freq / max(1.0, len(long_df))
+    delta = short_freq - long_freq
+    delta = delta - delta.min()
+    scores[1:] = delta[1:]
+    return _normalize_scores(scores)
+
+
+def _build_ev_scores_enhanced(df, target_date):
+    base = _build_ev_scores(df, target_date)
+    train_df = df[(df['日期'] < target_date) & (df['日期'] >= target_date - pd.Timedelta(days=EV_LOOKBACK_DAYS))]
+    if len(train_df) == 0:
+        train_df = df[df['日期'] < target_date].copy()
+    scores = base.copy()
+    scores += EV_W_PAIR * _pair_boost(train_df)
+    scores += EV_W_REPEAT * _repeat_boost(train_df)
+    scores += EV_W_REGIME * _regime_boost(train_df)
+    scores[0] = -1e9
+    return scores
+
+
 def suggest_ev_numbers(df, n, target_date):
-    scores = _build_ev_scores(df, target_date)
+    scores = _build_ev_scores_enhanced(df, target_date)
     selected = np.argsort(scores)[::-1][:n]
     return sorted(int(x) for x in selected.tolist())
 
