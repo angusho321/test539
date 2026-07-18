@@ -40,6 +40,19 @@ def upload_lottery_hist_to_drive():
         # 顯示檔案資訊
         file_size = os.path.getsize('lottery_hist.xlsx')
         print(f"📊 準備上傳開獎歷史檔案: lottery_hist.xlsx ({file_size} bytes)")
+
+        # 安全防護：拒絕用殘缺小檔覆蓋雲端完整歷史
+        MIN_ROWS = 100
+        try:
+            import pandas as pd
+            row_count = len(pd.read_excel('lottery_hist.xlsx', engine='openpyxl'))
+        except Exception as read_err:
+            print(f"❌ 無法讀取 lottery_hist.xlsx 進行驗證，中止上傳: {read_err}")
+            return False
+        if row_count < MIN_ROWS:
+            print(f"🛑 安全中止：lottery_hist.xlsx 僅 {row_count} 列（< {MIN_ROWS}），拒絕上傳以免覆蓋雲端完整歷史")
+            return False
+        print(f"🔍 上傳前驗證通過：{row_count} 列")
         
         if hist_file_id:
             try:
@@ -68,4 +81,6 @@ def upload_lottery_hist_to_drive():
         return False
 
 if __name__ == "__main__":
-    upload_lottery_hist_to_drive()
+    import sys
+    ok = upload_lottery_hist_to_drive()
+    sys.exit(0 if ok else 1)

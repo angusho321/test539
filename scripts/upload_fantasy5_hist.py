@@ -33,7 +33,20 @@ def upload_fantasy5_hist_to_drive():
         if not os.path.exists('fantasy5_hist.xlsx'):
             print("❌ fantasy5_hist.xlsx 不存在")
             return False
-        
+
+        # 安全防護：拒絕用殘缺小檔覆蓋雲端完整歷史
+        MIN_ROWS = 100
+        try:
+            import pandas as pd
+            row_count = len(pd.read_excel('fantasy5_hist.xlsx', engine='openpyxl'))
+        except Exception as read_err:
+            print(f"❌ 無法讀取 fantasy5_hist.xlsx 進行驗證，中止上傳: {read_err}")
+            return False
+        if row_count < MIN_ROWS:
+            print(f"🛑 安全中止：fantasy5_hist.xlsx 僅 {row_count} 列（< {MIN_ROWS}），拒絕上傳以免覆蓋雲端完整歷史")
+            return False
+        print(f"🔍 上傳前驗證通過：{row_count} 列")
+
         # 上傳檔案
         media = MediaFileUpload('fantasy5_hist.xlsx',
                               mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
@@ -51,4 +64,6 @@ def upload_fantasy5_hist_to_drive():
         return False
 
 if __name__ == "__main__":
-    upload_fantasy5_hist_to_drive()
+    import sys
+    ok = upload_fantasy5_hist_to_drive()
+    sys.exit(0 if ok else 1)

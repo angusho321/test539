@@ -495,11 +495,13 @@ class Fantasy5Crawler:
                     existing_df = pd.read_excel(history_filename, engine='openpyxl')
                     logger.info(f"📊 現有記錄數: {len(existing_df)} 筆")
                 except Exception as e:
-                    logger.warning(f"⚠️ 讀取現有檔案失敗: {e}，將建立新檔案")
-                    existing_df = pd.DataFrame(columns=['日期', '星期', '號碼1', '號碼2', '號碼3', '號碼4', '號碼5', '期別'])
+                    # 讀不動現有檔案時中止，不可建立殘缺檔覆蓋雲端完整歷史
+                    logger.error(f"🛑 讀取現有歷史檔案失敗: {e}。中止，避免以殘缺檔覆蓋雲端。")
+                    return False
             else:
-                logger.info("📁 建立新的歷史檔案")
-                existing_df = pd.DataFrame(columns=['日期', '星期', '號碼1', '號碼2', '號碼3', '號碼4', '號碼5', '期別'])
+                # 歷史檔不存在通常代表下載步驟失敗；中止而非建立只含今日一筆的殘缺檔
+                logger.error(f"🛑 歷史檔案不存在: {history_filename}。中止，避免建立殘缺檔覆蓋雲端。若確為首次建置，請手動放置種子檔後再執行。")
+                return False
             
             # 建立新結果的DataFrame
             new_df = pd.DataFrame(formatted_results)
@@ -571,6 +573,8 @@ def main():
             logger.info("✅ 程式執行完成")
         else:
             logger.error("❌ 保存結果失敗")
+            import sys
+            sys.exit(1)
     else:
         logger.warning("⚠️ 未找到開獎結果")
         logger.info("💡 可能的原因:")

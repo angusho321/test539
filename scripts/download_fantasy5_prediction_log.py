@@ -69,4 +69,6 @@ def download_fantasy5_prediction_log():
         return False
 
 if __name__ == "__main__":
-    download_fantasy5_prediction_log()
+    import sys
+    ok = download_fantasy5_prediction_log()
+    sys.exit(0 if ok else 1)

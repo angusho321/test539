@@ -69,4 +69,7 @@ def download_fantasy5_from_drive():
         return False
 
 if __name__ == "__main__":
-    download_fantasy5_from_drive()
+    import sys
+    ok = download_fantasy5_from_drive()
+    # 下載失敗須以非零碼退出，否則後續爬蟲會在無歷史檔情況下建立殘缺檔並覆蓋雲端
+    sys.exit(0 if ok else 1)
